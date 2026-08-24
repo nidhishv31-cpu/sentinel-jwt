@@ -1206,3 +1206,79 @@ async def import_nmap_xml(file: UploadFile = File(...)):
         "status": "completed",
         "topology": compute_radial_topology_coordinates(hosts)
     }
+
+
+def persist_nmap_findings_to_db(job: NmapScanJob):
+    """Automatically synchronizes discovered Nmap open ports and CVEs into the scan_findings database."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        now_str = datetime.now().isoformat()
+        
+        for host in job.hosts:
+            ip = host.get("ip") or (host.get("hostnames", [job.target])[0] if host.get("hostnames") else job.target)
+            for p in host.get("ports", []):
+                if p.get("state") == "open":
+                    port = p.get("port")
+                    proto = p.get("protocol", "tcp")
+                    svc = p.get("service", "unknown")
+                    prod = p.get("product", "")
+                    ver = p.get("version", "")
+                    is_high = p.get("is_high_risk", False)
+                    
+                    title = f"Exposed Service: {svc.upper()} on {port}/{proto}"
+                    severity = "critical" if port in [3389, 445, 23] else "high" if is_high else "medium"
+                    cvss_score = 9.0 if severity == "critical" else 7.5 if severity == "high" else 5.0
+                    desc = f"Port {port}/{proto} is open and exposing {svc} ({prod} {ver}). {p.get('high_risk_reason', '')}".strip()
+                    f_hash = f"nmap_{ip}_{port}_{svc}"
+                    
+                    # Insert or update
+                    cursor.execute("""
+                    INSERT INTO scan_findings (
+                        scan_id, target, finding_hash, module_name, title, description,
+                        severity, cvss_score, cwe, status, first_seen, last_seen, consecutive_count
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        job.scan_id, ip, f_hash, "nmap_engine", title, desc,
+                        severity, cvss_score, "CWE-200", "open", now_str, now_str, 1
+                    ))
+                    
+            for v in host.get("vulnerabilities", []):
+                cve = v.get("cve", "CVE-UNKNOWN")
+                cvss = float(v.get("cvss_score", 7.5))
+                svc = v.get("service", "unknown")
+                port = v.get("port", 0)
+                f_hash = f"nmap_{ip}_{cve}_{port}"
+                cursor.execute("""
+                INSERT INTO scan_findings (
+                    scan_id, target, finding_hash, module_name, title, description,
+                    severity, cvss_score, cwe, status, first_seen, last_seen, consecutive_count
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    job.scan_id, ip, f_hash, "nse_vulners", f"Vulnerability {cve} on {svc}:{port}",
+                    f"NSE Vulners identified {cve} associated with {svc} on port {port}.",
+                    "critical" if cvss >= 9.0 else "high" if cvss >= 7.0 else "medium",
+                    cvss, "CWE-94", "open", now_str, now_str, 1
+                ))
+                
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Error persisting nmap findings to DB: {e}")
+
+@app.get("/api/scan/runs")
+def list_scan_runs():
+    """Returns a structured list of all registered scan runs for Baseline Diffing and Reports."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT scan_id, target, MIN(first_seen) as timestamp, COUNT(*) as count,
+               SUM(CASE WHEN severity = 'critical' THEN 1 ELSE 0 END) as critical_count,
+               SUM(CASE WHEN severity = 'high' THEN 1 ELSE 0 END) as high_count
+        FROM scan_findings
+        GROUP BY scan_id, target
+        ORDER BY timestamp DESC
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
