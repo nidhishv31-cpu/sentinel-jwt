@@ -9,8 +9,16 @@ DEFAULT_DB_PATH = os.path.join(DB_DIR, "db", "sentinel.db")
 
 def get_connection(db_path: str = DEFAULT_DB_PATH) -> sqlite3.Connection:
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=10.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    # High-performance WAL mode and memory caching
+    try:
+        conn.execute("PRAGMA journal_mode = WAL;")
+        conn.execute("PRAGMA synchronous = NORMAL;")
+        conn.execute("PRAGMA cache_size = 10000;")
+        conn.execute("PRAGMA temp_store = MEMORY;")
+    except Exception:
+        pass
     return conn
 
 def init_db(db_path: str = DEFAULT_DB_PATH):
@@ -113,6 +121,69 @@ def init_db(db_path: str = DEFAULT_DB_PATH):
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_blocked_ips_ip ON blocked_ips(ip_address)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_signing_keys_status ON signing_keys(status)")
     
+    # Create scan_findings table for normalized findings and baseline diffing
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS scan_findings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        scan_id TEXT NOT NULL,
+        target TEXT NOT NULL,
+        finding_hash TEXT NOT NULL,
+        module_name TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        severity TEXT NOT NULL,
+        cvss_vector TEXT,
+        cvss_score REAL DEFAULT 0.0,
+        cwe TEXT,
+        remediation TEXT,
+        raw_evidence TEXT,
+        status TEXT DEFAULT 'open',
+        first_seen TEXT NOT NULL,
+        last_seen TEXT NOT NULL,
+        consecutive_count INTEGER DEFAULT 1
+    )
+    """)
+
+    # Create carved_artifacts table for safe inert file extractions
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS carved_artifacts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        capture_id TEXT NOT NULL,
+        stream_id INTEGER,
+        filename TEXT NOT NULL,
+        stored_path TEXT NOT NULL,
+        file_type TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        file_size INTEGER NOT NULL,
+        md5_hash TEXT NOT NULL,
+        sha256_hash TEXT NOT NULL,
+        is_truncated BOOLEAN DEFAULT 0,
+        carved_at TEXT NOT NULL
+    )
+    """)
+
+    # Create scan_reports table for decoupled async reporting
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS scan_reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        report_id TEXT UNIQUE NOT NULL,
+        title TEXT NOT NULL,
+        target TEXT NOT NULL,
+        format TEXT NOT NULL,
+        status TEXT NOT NULL,
+        file_path TEXT,
+        summary_json TEXT,
+        created_at TEXT NOT NULL
+    )
+    """)
+
+    # Additional Indexes
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_findings_target ON scan_findings(target)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_findings_hash ON scan_findings(finding_hash)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_findings_scan ON scan_findings(scan_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_carved_capture ON carved_artifacts(capture_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_reports_id ON scan_reports(report_id)")
+
     conn.commit()
     conn.close()
 
@@ -134,6 +205,69 @@ def add_security_event(
         (timestamp, event_type, source_ip, details_str, severity, created_at)
     )
     event_id = cursor.lastrowid
+    # Create scan_findings table for normalized findings and baseline diffing
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS scan_findings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        scan_id TEXT NOT NULL,
+        target TEXT NOT NULL,
+        finding_hash TEXT NOT NULL,
+        module_name TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        severity TEXT NOT NULL,
+        cvss_vector TEXT,
+        cvss_score REAL DEFAULT 0.0,
+        cwe TEXT,
+        remediation TEXT,
+        raw_evidence TEXT,
+        status TEXT DEFAULT 'open',
+        first_seen TEXT NOT NULL,
+        last_seen TEXT NOT NULL,
+        consecutive_count INTEGER DEFAULT 1
+    )
+    """)
+
+    # Create carved_artifacts table for safe inert file extractions
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS carved_artifacts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        capture_id TEXT NOT NULL,
+        stream_id INTEGER,
+        filename TEXT NOT NULL,
+        stored_path TEXT NOT NULL,
+        file_type TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        file_size INTEGER NOT NULL,
+        md5_hash TEXT NOT NULL,
+        sha256_hash TEXT NOT NULL,
+        is_truncated BOOLEAN DEFAULT 0,
+        carved_at TEXT NOT NULL
+    )
+    """)
+
+    # Create scan_reports table for decoupled async reporting
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS scan_reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        report_id TEXT UNIQUE NOT NULL,
+        title TEXT NOT NULL,
+        target TEXT NOT NULL,
+        format TEXT NOT NULL,
+        status TEXT NOT NULL,
+        file_path TEXT,
+        summary_json TEXT,
+        created_at TEXT NOT NULL
+    )
+    """)
+
+    # Additional Indexes
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_findings_target ON scan_findings(target)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_findings_hash ON scan_findings(finding_hash)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_findings_scan ON scan_findings(scan_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_carved_capture ON carved_artifacts(capture_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_reports_id ON scan_reports(report_id)")
+
     conn.commit()
     conn.close()
     return event_id
@@ -157,6 +291,69 @@ def add_alert(
         (rule_triggered, severity, source_ip, event_ids_str, explanation, status, created_at)
     )
     alert_id = cursor.lastrowid
+    # Create scan_findings table for normalized findings and baseline diffing
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS scan_findings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        scan_id TEXT NOT NULL,
+        target TEXT NOT NULL,
+        finding_hash TEXT NOT NULL,
+        module_name TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        severity TEXT NOT NULL,
+        cvss_vector TEXT,
+        cvss_score REAL DEFAULT 0.0,
+        cwe TEXT,
+        remediation TEXT,
+        raw_evidence TEXT,
+        status TEXT DEFAULT 'open',
+        first_seen TEXT NOT NULL,
+        last_seen TEXT NOT NULL,
+        consecutive_count INTEGER DEFAULT 1
+    )
+    """)
+
+    # Create carved_artifacts table for safe inert file extractions
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS carved_artifacts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        capture_id TEXT NOT NULL,
+        stream_id INTEGER,
+        filename TEXT NOT NULL,
+        stored_path TEXT NOT NULL,
+        file_type TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        file_size INTEGER NOT NULL,
+        md5_hash TEXT NOT NULL,
+        sha256_hash TEXT NOT NULL,
+        is_truncated BOOLEAN DEFAULT 0,
+        carved_at TEXT NOT NULL
+    )
+    """)
+
+    # Create scan_reports table for decoupled async reporting
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS scan_reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        report_id TEXT UNIQUE NOT NULL,
+        title TEXT NOT NULL,
+        target TEXT NOT NULL,
+        format TEXT NOT NULL,
+        status TEXT NOT NULL,
+        file_path TEXT,
+        summary_json TEXT,
+        created_at TEXT NOT NULL
+    )
+    """)
+
+    # Additional Indexes
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_findings_target ON scan_findings(target)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_findings_hash ON scan_findings(finding_hash)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_findings_scan ON scan_findings(scan_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_carved_capture ON carved_artifacts(capture_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_reports_id ON scan_reports(report_id)")
+
     conn.commit()
     conn.close()
     return alert_id
@@ -185,6 +382,69 @@ def update_alert_status(alert_id: int, status: str, db_path: str = DEFAULT_DB_PA
     cursor = conn.cursor()
     cursor.execute("UPDATE alerts SET status = ? WHERE id = ?", (status, alert_id))
     updated = cursor.rowcount > 0
+    # Create scan_findings table for normalized findings and baseline diffing
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS scan_findings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        scan_id TEXT NOT NULL,
+        target TEXT NOT NULL,
+        finding_hash TEXT NOT NULL,
+        module_name TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        severity TEXT NOT NULL,
+        cvss_vector TEXT,
+        cvss_score REAL DEFAULT 0.0,
+        cwe TEXT,
+        remediation TEXT,
+        raw_evidence TEXT,
+        status TEXT DEFAULT 'open',
+        first_seen TEXT NOT NULL,
+        last_seen TEXT NOT NULL,
+        consecutive_count INTEGER DEFAULT 1
+    )
+    """)
+
+    # Create carved_artifacts table for safe inert file extractions
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS carved_artifacts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        capture_id TEXT NOT NULL,
+        stream_id INTEGER,
+        filename TEXT NOT NULL,
+        stored_path TEXT NOT NULL,
+        file_type TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        file_size INTEGER NOT NULL,
+        md5_hash TEXT NOT NULL,
+        sha256_hash TEXT NOT NULL,
+        is_truncated BOOLEAN DEFAULT 0,
+        carved_at TEXT NOT NULL
+    )
+    """)
+
+    # Create scan_reports table for decoupled async reporting
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS scan_reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        report_id TEXT UNIQUE NOT NULL,
+        title TEXT NOT NULL,
+        target TEXT NOT NULL,
+        format TEXT NOT NULL,
+        status TEXT NOT NULL,
+        file_path TEXT,
+        summary_json TEXT,
+        created_at TEXT NOT NULL
+    )
+    """)
+
+    # Additional Indexes
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_findings_target ON scan_findings(target)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_findings_hash ON scan_findings(finding_hash)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_findings_scan ON scan_findings(scan_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_carved_capture ON carved_artifacts(capture_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_reports_id ON scan_reports(report_id)")
+
     conn.commit()
     conn.close()
     return updated

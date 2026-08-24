@@ -1,3 +1,5 @@
+import asyncio
+import uuid
 import os
 import sys
 import tempfile
@@ -22,7 +24,7 @@ from backend.log_parser import parse_log_content
 from backend.pcap_analyzer import (
     parse_pcap_file, check_tshark_installed, get_tshark_path,
     get_network_interfaces, evaluate_filter, live_capture_manager,
-    follow_tcp_stream, compare_pcap_files, extract_pcap_artifacts
+    follow_tcp_stream, get_pcap_tcp_streams, compare_pcap_files, extract_pcap_artifacts
 )
 from backend.threat_intel import fetch_and_store_feeds, lookup_ip, get_threat_intel_stats
 from backend.geo_lookup import geolocate_ip, get_attack_map_data
@@ -85,6 +87,17 @@ def startup_event():
         print("\n" + "!" * 80, file=sys.stderr)
         print(f"[CRITICAL ERROR] {str(e)}", file=sys.stderr)
         print("!" * 80 + "\n", file=sys.stderr)
+
+@app.get("/")
+@app.get("/health")
+@app.get("/api/health")
+def health_check():
+    return {
+        "status": "healthy",
+        "service": "SentinelJWT Security Suite",
+        "version": "1.0.0",
+        "timestamp": datetime.utcnow().isoformat() + "Z"
+    }
 
 # --- 1. JWT ANALYZER ENDPOINTS ---
 
@@ -320,13 +333,91 @@ async def upload_pcap(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"PCAP parsing failed: {str(e)}")
 
 
+@app.get("/api/pcap/captures")
+def list_uploaded_captures():
+    """List all available PCAP capture files in upload directory."""
+    files = []
+    for f in os.listdir(UPLOAD_DIR):
+        if f.endswith(('.pcap', '.pcapng', '.cap')):
+            full_p = os.path.join(UPLOAD_DIR, f)
+            files.append({
+                "filename": f,
+                "size_bytes": os.path.getsize(full_p),
+                "modified_at": datetime.fromtimestamp(os.path.getmtime(full_p)).isoformat()
+            })
+    return sorted(files, key=lambda x: x["modified_at"], reverse=True)
+
+
+KEYS_DIR = os.path.join(UPLOAD_DIR, "keys")
+os.makedirs(KEYS_DIR, exist_ok=True)
+
+@app.post("/api/pcap/upload-keylog")
+async def upload_tls_keylog(file: UploadFile = File(...)):
+    """Uploads a TLS keylog file (e.g. SSLKEYLOGFILE) or RSA Private Key (.pem/.key) for live packet decryption."""
+    target_path = os.path.join(KEYS_DIR, file.filename)
+    try:
+        content = await file.read()
+        with open(target_path, "wb") as f:
+            f.write(content)
+        return {
+            "status": "success",
+            "keylog_id": file.filename,
+            "filename": file.filename,
+            "size_bytes": len(content),
+            "message": f"TLS decryption key file '{file.filename}' uploaded successfully."
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to upload keylog: {str(e)}")
+
+@app.get("/api/pcap/keylogs")
+def list_uploaded_keylogs():
+    """Lists all available TLS keylog / private key files."""
+    files = []
+    if os.path.exists(KEYS_DIR):
+        for f in os.listdir(KEYS_DIR):
+            full_p = os.path.join(KEYS_DIR, f)
+            if os.path.isfile(full_p):
+                files.append({
+                    "keylog_id": f,
+                    "filename": f,
+                    "size_bytes": os.path.getsize(full_p),
+                    "modified_at": datetime.fromtimestamp(os.path.getmtime(full_p)).isoformat()
+                })
+    return sorted(files, key=lambda x: x["modified_at"], reverse=True)
+
+@app.get("/api/pcap/streams")
+def get_pcap_streams(capture_id: str, keylog_id: Optional[str] = None):
+    """Extracts all distinct TCP streams from the specified PCAP file with optional TLS keylog decryption."""
+    target_path = os.path.join(UPLOAD_DIR, capture_id)
+    if not os.path.exists(target_path):
+        raise HTTPException(status_code=404, detail="PCAP file not found.")
+    
+    keylog_path = os.path.join(KEYS_DIR, keylog_id) if keylog_id else None
+    if keylog_path and not os.path.exists(keylog_path):
+        keylog_path = None
+
+    streams = get_pcap_tcp_streams(target_path, keylog_path=keylog_path)
+    return {"capture_id": capture_id, "streams": streams, "keylog_id": keylog_id}
+
+
 @app.get("/api/pcap/follow-stream")
-def get_followed_stream(capture_id: str, stream_id: int):
+def get_followed_stream(capture_id: str, stream_id: int = 0, combine_all: bool = False, keylog_id: Optional[str] = None):
     target_path = os.path.join(UPLOAD_DIR, capture_id)
     if not os.path.exists(target_path):
         raise HTTPException(status_code=404, detail="PCAP file not found. Please upload it again.")
-    dialog = follow_tcp_stream(target_path, stream_id)
-    return {"capture_id": capture_id, "stream_id": stream_id, "dialog": dialog}
+    
+    keylog_path = os.path.join(KEYS_DIR, keylog_id) if keylog_id else None
+    if keylog_path and not os.path.exists(keylog_path):
+        keylog_path = None
+
+    dialog = follow_tcp_stream(target_path, stream_id, combine_all=combine_all, keylog_path=keylog_path)
+    return {
+        "capture_id": capture_id, 
+        "stream_id": -1 if combine_all else stream_id, 
+        "combined": combine_all,
+        "keylog_id": keylog_id,
+        "dialog": dialog
+    }
 
 
 @app.post("/api/pcap/compare")
@@ -542,7 +633,11 @@ def fetch_all_events(event_type: Optional[str] = None, page: int = 1, limit: int
         end = start + limit
         events = events[start:end]
         
-    return events
+from backend.diagnostics import generate_diagnostics
+
+@app.get("/api/diagnostics")
+def fetch_diagnostics():
+    return generate_diagnostics(DEFAULT_DB_PATH)
 
 @app.post("/api/demo")
 async def trigger_demo_seed():
@@ -658,3 +753,336 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
     except Exception:
         manager.disconnect(websocket)
+
+# --- 11. DAST & ADVANCED SCANNER ENGINE ENDPOINTS ---
+from backend.dast_scanners import (
+    get_scanner_engines_status, run_nuclei_scan, run_zap_scan, run_sqli_audit
+)
+
+class NucleiScanRequest(BaseModel):
+    target_url: str
+    severity: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+class ZapScanRequest(BaseModel):
+    target_url: str
+    scan_type: Optional[str] = "baseline"
+
+class SqliAuditRequest(BaseModel):
+    target_url: str
+    params: Optional[Dict[str, str]] = None
+
+@app.get("/api/scan/engines/status")
+def get_engines_status():
+    return get_scanner_engines_status()
+
+@app.post("/api/scan/nuclei")
+def scan_nuclei(req: NucleiScanRequest):
+    return run_nuclei_scan(req.target_url, req.severity, req.tags)
+
+@app.post("/api/scan/zap")
+def scan_zap(req: ZapScanRequest):
+    return run_zap_scan(req.target_url, req.scan_type)
+
+@app.post("/api/scan/sqli")
+def audit_sqli(req: SqliAuditRequest):
+    return run_sqli_audit(req.target_url, req.params)
+
+
+
+# ==============================================================================
+# ADVANCED SCANNER & FORENSICS MODULE ENDPOINTS (MODULES 1 - 9)
+# ==============================================================================
+
+from backend.ssl_auditor import audit_ssl_target
+from backend.scanner_orchestrator import scan_orchestrator, SCAN_PROFILES
+from backend.http_repeater import replay_raw_http_request, check_ssrf_risk
+from backend.file_carver import carve_files_from_bytes
+from backend.geo_asn_map import batch_aggregate_pcap_geo, resolve_single_ip_geo
+from backend.beacon_detector import analyze_traffic_beaconing
+from backend.report_generator import generate_report_async, assemble_report_data, render_html_report, calculate_cvss31_score
+from backend.baseline_diff import perform_baseline_diff
+
+# ── MODULE 1: SSL/TLS AUDITOR ──────────────────────────────────────────────────
+class SSLAuditRequest(BaseModel):
+    target: str
+
+@app.post("/api/ssl/audit")
+async def run_ssl_audit(req: SSLAuditRequest):
+    """Module 1: Performs deterministic SSL/TLS security & cipher suite audit."""
+    try:
+        result = await asyncio.to_thread(audit_ssl_target, req.target)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"SSL Audit failed: {str(e)}")
+
+# ── MODULE 2: SCAN PROFILES & ORCHESTRATOR ─────────────────────────────────────
+@app.get("/api/scan/profiles")
+def list_scan_profiles():
+    """Module 2: Lists declarative scan profiles with concurrency and rate limits."""
+    return scan_orchestrator.get_profiles()
+
+class OrchestratedScanRequest(BaseModel):
+    scan_id: Optional[str] = None
+    target_url: str
+    profile: str = "owasp_fast"
+    custom_params: Optional[Dict[str, Any]] = None
+
+@app.post("/api/scan/orchestrated")
+async def start_orchestrated_scan(req: OrchestratedScanRequest):
+    """Module 2: Runs an orchestrated scan applying profile rate limits and structured logging."""
+    scan_id = req.scan_id or f"scan_{uuid.uuid4().hex[:8]}"
+    summary = await scan_orchestrator.run_scan(
+        scan_id=scan_id,
+        target_url=req.target_url,
+        profile_key=req.profile,
+        custom_params=req.custom_params
+    )
+    return summary
+
+@app.get("/api/scan/findings")
+def list_scan_findings(target: Optional[str] = None, scan_id: Optional[str] = None):
+    """Retrieves normalized scan findings from database."""
+    conn = get_connection(DEFAULT_DB_PATH)
+    cursor = conn.cursor()
+    query = "SELECT * FROM scan_findings WHERE 1=1"
+    params = []
+    if target:
+        query += " AND target = ?"
+        params.append(target)
+    if scan_id:
+        query += " AND scan_id = ?"
+        params.append(scan_id)
+    query += " ORDER BY id DESC LIMIT 500"
+    
+    cursor.execute(query, tuple(params))
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+# ── MODULE 3: INTERACTIVE HTTP REPEATER ────────────────────────────────────────
+class RepeaterRequest(BaseModel):
+    method: str = "GET"
+    url: str
+    headers: Optional[Dict[str, str]] = None
+    body: Optional[str] = None
+    allow_private_network: bool = False
+
+@app.post("/api/repeater/send")
+async def repeater_send_request(req: RepeaterRequest):
+    """Module 3: Replays raw HTTP request with SSRF guard and streaming cap."""
+    try:
+        result = await asyncio.to_thread(
+            replay_raw_http_request,
+            req.method,
+            req.url,
+            req.headers,
+            req.body,
+            req.allow_private_network
+        )
+        return result
+    except Exception as e:
+        return {
+            "status": "network_error",
+            "url": req.url,
+            "error": str(e),
+            "response_status": 0,
+            "response_headers": {},
+            "response_body": f"Backend repeater execution error: {str(e)}",
+            "duration_ms": 0
+        }
+
+@app.post("/api/repeater/check-ssrf")
+def repeater_check_ssrf(url: str):
+    """Pre-flight SSRF check for target URL."""
+    is_private, warning, resolved_ips = check_ssrf_risk(url)
+    return {
+        "url": url,
+        "is_private_risk": is_private,
+        "warning": warning,
+        "resolved_ips": resolved_ips
+    }
+
+# ── MODULE 4: AUTOMATED FILE CARVER ────────────────────────────────────────────
+@app.get("/api/pcap/carved/{capture_id}")
+def get_pcap_carved_files(capture_id: str):
+    """Module 4: Extracts images and documents from PCAP stream payloads using magic bytes."""
+    target_path = os.path.join(UPLOAD_DIR, capture_id)
+    if not os.path.exists(target_path):
+        raise HTTPException(status_code=404, detail="PCAP file not found.")
+    
+    from backend.pcap_analyzer import carve_artifacts_from_pcap
+    artifacts = carve_artifacts_from_pcap(target_path, capture_id=capture_id)
+    return {"capture_id": capture_id, "carved_count": len(artifacts), "artifacts": artifacts}
+
+@app.get("/api/pcap/carved/download/{filename}")
+def download_carved_file(filename: str):
+    """Safely serves carved file with inert octet-stream header to avoid host execution."""
+    carved_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads", "carved")
+    file_path = os.path.join(carved_dir, os.path.basename(filename))
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Carved file not found.")
+        
+    return FileResponse(
+        file_path,
+        media_type="application/octet-stream",
+        filename=os.path.basename(filename),
+        headers={"Content-Disposition": f'attachment; filename="{os.path.basename(filename)}"'}
+    )
+
+# ── MODULE 5: GEO THREAT MAP ───────────────────────────────────────────────────
+@app.get("/api/pcap/geomap/{capture_id}")
+def get_pcap_geo_threat_map(capture_id: str):
+    """Module 5: Returns batch-aggregated and de-duplicated IP coordinates and flow arcs."""
+    target_path = os.path.join(UPLOAD_DIR, capture_id)
+    if not os.path.exists(target_path):
+        raise HTTPException(status_code=404, detail="PCAP file not found.")
+        
+    streams = get_pcap_tcp_streams(target_path)
+    flows = []
+    for s in streams:
+        src_ip = s.get("client", "").split(":")[0]
+        dst_ip = s.get("server", "").split(":")[0]
+        if src_ip and dst_ip:
+            flows.append({
+                "src_ip": src_ip,
+                "dst_ip": dst_ip,
+                "packet_count": s.get("packet_count", 1)
+            })
+            
+    geo_data = batch_aggregate_pcap_geo(flows, db_path=DEFAULT_DB_PATH)
+    return {"capture_id": capture_id, **geo_data}
+
+# ── MODULE 6: C2 BEACONING DETECTOR ────────────────────────────────────────────
+@app.get("/api/pcap/beaconing/{capture_id}")
+def get_pcap_beaconing_analysis(capture_id: str):
+    """Module 6: Analyzes flow inter-arrival times and coefficient of variation for periodic beaconing."""
+    target_path = os.path.join(UPLOAD_DIR, capture_id)
+    if not os.path.exists(target_path):
+        raise HTTPException(status_code=404, detail="PCAP file not found.")
+        
+    import subprocess
+    tshark_exe = get_tshark_path()
+    try:
+        cmd = [
+            tshark_exe,
+            "-r", target_path,
+            "-T", "fields",
+            "-e", "frame.time_epoch",
+            "-e", "ip.src",
+            "-e", "ip.dst",
+            "-e", "tcp.dstport",
+            "-e", "udp.dstport",
+            "-e", "_ws.col.Protocol"
+        ]
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+        lines = proc.stdout.strip().splitlines()
+        
+        timeline_pkts = []
+        for line in lines:
+            parts = line.split("\t")
+            if len(parts) >= 3 and parts[0]:
+                try:
+                    ts = float(parts[0])
+                    src = parts[1]
+                    dst = parts[2]
+                    port = int(parts[3] or parts[4] or 0)
+                    proto = parts[5] if len(parts) > 5 else "TCP"
+                    timeline_pkts.append({
+                        "timestamp": ts,
+                        "src_ip": src,
+                        "dst_ip": dst,
+                        "dst_port": port,
+                        "protocol": proto
+                    })
+                except Exception:
+                    pass
+
+        indicators = analyze_traffic_beaconing(timeline_pkts)
+        return {
+            "capture_id": capture_id,
+            "total_packets_analyzed": len(timeline_pkts),
+            "beaconing_indicators_count": len(indicators),
+            "indicators": indicators
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Beaconing analysis failed: {str(e)}")
+
+# ── MODULE 8: EXECUTIVE REPORTS & CVSS 3.1 ──────────────────────────────────────
+class ReportGenRequest(BaseModel):
+    target: str
+    findings: Optional[List[Dict[str, Any]]] = None
+    output_format: str = "html"
+
+@app.post("/api/reports/generate")
+def create_executive_report(req: ReportGenRequest):
+    """Module 8: Initiates asynchronous generation of executive PDF/HTML report."""
+    findings = req.findings
+    if findings is None:
+        # Fetch latest findings for target from DB
+        conn = get_connection(DEFAULT_DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM scan_findings WHERE target = ? ORDER BY id DESC LIMIT 200", (req.target,))
+        findings = [dict(r) for r in cursor.fetchall()]
+        conn.close()
+
+    report_id = generate_report_async(
+        target=req.target,
+        findings=findings or [],
+        output_format=req.output_format,
+        db_path=DEFAULT_DB_PATH
+    )
+    return {"report_id": report_id, "status": "generating", "target": req.target}
+
+@app.get("/api/reports/status/{report_id}")
+def check_report_status(report_id: str):
+    """Polls async report generation status."""
+    conn = get_connection(DEFAULT_DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM scan_reports WHERE report_id = ?", (report_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Report not found.")
+    data = dict(row)
+    if data.get("summary_json"):
+        try:
+            data["summary_data"] = json.loads(data["summary_json"])
+        except Exception:
+            pass
+    return data
+
+@app.get("/api/reports/download/{report_id}")
+def download_executive_report(report_id: str):
+    """Downloads completed executive report."""
+    conn = get_connection(DEFAULT_DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT file_path, format FROM scan_reports WHERE report_id = ?", (report_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row or not row["file_path"] or not os.path.exists(row["file_path"]):
+        raise HTTPException(status_code=404, detail="Report file not ready or not found.")
+        
+    return FileResponse(
+        row["file_path"],
+        media_type="text/html" if row["format"] == "html" else "application/pdf",
+        filename=f"executive_report_{report_id}.{row['format']}"
+    )
+
+@app.post("/api/cvss/calculate")
+def calculate_cvss(vector: str):
+    """Module 8: Computes exact FIRST.org CVSS 3.1 score from vector string."""
+    try:
+        return calculate_cvss31_score(vector)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid CVSS vector: {str(e)}")
+
+# ── MODULE 9: BASELINE DIFF SCANNER ────────────────────────────────────────────
+class DiffRequest(BaseModel):
+    baseline_findings: List[Dict[str, Any]]
+    current_findings: List[Dict[str, Any]]
+
+@app.post("/api/scan/diff")
+def compute_scan_diff(req: DiffRequest):
+    """Module 9: Performs 4-way baseline comparison (New, Resolved, Still-Open, Changed-Severity)."""
+    return perform_baseline_diff(req.baseline_findings, req.current_findings)

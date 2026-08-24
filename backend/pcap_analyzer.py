@@ -1019,53 +1019,205 @@ class LiveCaptureManager:
 
 live_capture_manager = LiveCaptureManager()
 
+# Global In-Memory Cache for rapid forensics retrieval
+_PCAP_STREAMS_CACHE: Dict[str, Any] = {}
+_PCAP_TRANSCRIPT_CACHE: Dict[str, Any] = {}
 
-def follow_tcp_stream(pcap_path: str, stream_id: int) -> List[Dict[str, Any]]:
+def get_pcap_tcp_streams(pcap_path: str, keylog_path: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Discovers and summarizes all unique TCP streams in the PCAP file with mtime caching and optional TLS decryption.
+    """
+    if not os.path.exists(pcap_path):
+        return []
+    
+    mtime = os.path.getmtime(pcap_path)
+    key_mtime = os.path.getmtime(keylog_path) if (keylog_path and os.path.exists(keylog_path)) else 0
+    cache_key = f"{pcap_path}:{mtime}:{keylog_path}:{key_mtime}"
+    if cache_key in _PCAP_STREAMS_CACHE:
+        return _PCAP_STREAMS_CACHE[cache_key]
+
     import subprocess
     tshark_exe = get_tshark_path()
     try:
         cmd = [
             tshark_exe,
-            "-r", pcap_path,
-            "-Y", f"tcp.stream == {stream_id}",
+            "-r", pcap_path
+        ]
+        
+        # Inject TLS Keylog or RSA key for live packet decryption if available
+        if keylog_path and os.path.exists(keylog_path):
+            cmd.extend([
+                "-o", f"tls.keylog_file:{keylog_path}",
+                "-o", f"ssl.keylog_file:{keylog_path}",
+                "-o", f"tls.keys_list:0.0.0.0,443,http,{keylog_path}",
+                "-o", f"uat:tls_keys:{keylog_path}"
+            ])
+
+        cmd.extend([
+            "-Y", "tcp || quic || udp.port == 443",
             "-T", "fields",
+            "-e", "frame.number",
+            "-e", "tcp.stream",
             "-e", "ip.src",
             "-e", "ip.dst",
             "-e", "tcp.srcport",
             "-e", "tcp.dstport",
-            "-e", "tcp.payload"
+            "-e", "_ws.col.Protocol",
+            "-e", "_ws.col.Info"
+        ])
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+        lines = result.stdout.strip().splitlines()
+        
+        streams_map = {}
+        for line in lines:
+            parts = line.split("\t")
+            if len(parts) >= 6 and parts[1] != "":
+                try:
+                    s_id = int(parts[1])
+                except ValueError:
+                    continue
+                src_ip = parts[2] if len(parts) > 2 else ""
+                dst_ip = parts[3] if len(parts) > 3 else ""
+                src_port = parts[4] if len(parts) > 4 else ""
+                dst_port = parts[5] if len(parts) > 5 else ""
+                proto = parts[6] if len(parts) > 6 and parts[6] else "TCP"
+                info = parts[7] if len(parts) > 7 else ""
+                
+                if s_id not in streams_map:
+                    streams_map[s_id] = {
+                        "stream_id": s_id,
+                        "client": f"{src_ip}:{src_port}",
+                        "server": f"{dst_ip}:{dst_port}",
+                        "protocol": proto,
+                        "packet_count": 0,
+                        "preview": info[:80] if info else "TCP Session"
+                    }
+                streams_map[s_id]["packet_count"] += 1
+                if proto not in ["TCP", ""] and streams_map[s_id]["protocol"] == "TCP":
+                    streams_map[s_id]["protocol"] = proto
+                if info and streams_map[s_id]["preview"] == "TCP Session":
+                    streams_map[s_id]["preview"] = info[:80]
+
+        res = sorted(list(streams_map.values()), key=lambda x: x["stream_id"])
+        _PCAP_STREAMS_CACHE[cache_key] = res
+        return res
+    except Exception as e:
+        print(f"Error extracting TCP streams: {e}", file=sys.stderr)
+        return []
+
+
+def follow_tcp_stream(pcap_path: str, stream_id: int = 0, combine_all: bool = False, max_packets: int = 2000, keylog_path: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Reassembles conversation streams with payload truncation, safe byte decoding, mtime caching, and optional TLS decryption.
+    """
+    if not os.path.exists(pcap_path):
+        return []
+
+    mtime = os.path.getmtime(pcap_path)
+    key_mtime = os.path.getmtime(keylog_path) if (keylog_path and os.path.exists(keylog_path)) else 0
+    cache_key = f"{pcap_path}:{mtime}:{stream_id}:{combine_all}:{max_packets}:{keylog_path}:{key_mtime}"
+    if cache_key in _PCAP_TRANSCRIPT_CACHE:
+        return _PCAP_TRANSCRIPT_CACHE[cache_key]
+
+    import subprocess
+    tshark_exe = get_tshark_path()
+    
+    if combine_all or stream_id == -1:
+        filter_expr = "tcp.payload || http"
+    else:
+        filter_expr = f"tcp.stream == {stream_id} && (tcp.payload || http)"
+
+    try:
+        cmd = [
+            tshark_exe,
+            "-r", pcap_path
         ]
+        
+        # Inject TLS Keylog or RSA key if available
+        if keylog_path and os.path.exists(keylog_path):
+            cmd.extend([
+                "-o", f"tls.keylog_file:{keylog_path}",
+                "-o", f"ssl.keylog_file:{keylog_path}",
+                "-o", f"tls.keys_list:0.0.0.0,443,http,{keylog_path}",
+                "-o", f"uat:tls_keys:{keylog_path}"
+            ])
+
+        cmd.extend([
+            "-Y", filter_expr,
+            "-c", str(max_packets),
+            "-T", "fields",
+            "-e", "tcp.stream",
+            "-e", "ip.src",
+            "-e", "ip.dst",
+            "-e", "tcp.srcport",
+            "-e", "tcp.dstport",
+            "-e", "tcp.payload",
+            "-e", "http.file_data",
+            "-e", "data-text-lines",
+            "-e", "_ws.col.Protocol",
+            "-e", "_ws.col.Info"
+        ])
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
         lines = result.stdout.strip().splitlines()
         
         dialog = []
         for line in lines:
             parts = line.split("\t")
-            if len(parts) >= 5 and parts[4]:
-                src_ip = parts[0]
-                dst_ip = parts[1]
-                src_port = parts[2]
-                dst_port = parts[3]
-                hex_payload = parts[4].replace(":", "")
+            if len(parts) >= 6:
+                cur_stream = int(parts[0]) if parts[0] else 0
+                src_ip = parts[1] if len(parts) > 1 else ""
+                dst_ip = parts[2] if len(parts) > 2 else ""
+                src_port = parts[3] if len(parts) > 3 else ""
+                dst_port = parts[4] if len(parts) > 4 else ""
+                raw_hex = parts[5].replace(":", "") if len(parts) > 5 else ""
+                http_data = parts[6] if len(parts) > 6 else ""
+                data_text = parts[7] if len(parts) > 7 else ""
+                proto = parts[8] if len(parts) > 8 else "TCP"
+                info = parts[9] if len(parts) > 9 else ""
                 
-                try:
-                    payload_bytes = bytes.fromhex(hex_payload)
-                    ascii_payload = payload_bytes.decode("utf-8", errors="replace")
-                except Exception:
-                    ascii_payload = f"[Hex Data: {hex_payload}]"
+                is_decrypted_tls = False
+                
+                # Check for decrypted HTTP / JSON payloads
+                if http_data or data_text or "HTTP" in proto:
+                    is_decrypted_tls = True
+                    ascii_payload = (data_text or http_data or info)
+                    if not raw_hex:
+                        raw_hex = ascii_payload.encode('utf-8').hex()
+                elif raw_hex:
+                    # Payload safety truncation for gigantic payloads (> 32KB)
+                    if len(raw_hex) > 65536:
+                        hex_payload = raw_hex[:65536] + f" ...[Truncated {len(raw_hex)//2} bytes]"
+                    else:
+                        hex_payload = raw_hex
+                    
+                    try:
+                        payload_bytes = bytes.fromhex(raw_hex[:32768])
+                        ascii_payload = payload_bytes.decode("utf-8", errors="replace")
+                        if len(raw_hex) > 32768:
+                            ascii_payload += f"\n...[+{(len(raw_hex) - 32768)//2} bytes truncated for display performance]"
+                    except Exception:
+                        ascii_payload = f"[Binary Hex Data: {hex_payload[:120]}...]"
+                else:
+                    continue
                 
                 dialog.append({
+                    "stream_id": cur_stream,
                     "src_ip": src_ip,
                     "dst_ip": dst_ip,
                     "src_port": src_port,
                     "dst_port": dst_port,
-                    "payload_hex": hex_payload,
+                    "protocol": proto,
+                    "is_decrypted_tls": is_decrypted_tls,
+                    "payload_hex": raw_hex,
                     "payload_ascii": ascii_payload
                 })
+        
+        _PCAP_TRANSCRIPT_CACHE[cache_key] = dialog
         return dialog
     except Exception as e:
         print(f"Error following stream {stream_id}: {e}", file=sys.stderr)
         return []
+
 
 
 def compare_pcap_files(pcap_path1: str, pcap_path2: str) -> Dict[str, Any]:
@@ -1214,3 +1366,26 @@ def extract_pcap_artifacts(pcap_path: str) -> List[Dict[str, Any]]:
         print(f"Error extracting artifacts: {e}", file=sys.stderr)
         return []
 
+
+def carve_artifacts_from_pcap(pcap_path: str, capture_id: str = "capture") -> List[Dict[str, Any]]:
+    """
+    Reads reassembled streams and uses file_carver.py to extract files and images.
+    """
+    from backend.file_carver import carve_files_from_bytes
+    if not os.path.exists(pcap_path):
+        return []
+    
+    dialog = follow_tcp_stream(pcap_path, stream_id=-1, combine_all=True)
+    all_carved = []
+    
+    for item in dialog:
+        hex_data = item.get("payload_hex", "")
+        if hex_data:
+            try:
+                raw_bytes = bytes.fromhex(hex_data.replace(" ", "").replace(":", ""))
+                carved = carve_files_from_bytes(raw_bytes, capture_id=capture_id, stream_id=item.get("stream_id", 0))
+                all_carved.extend(carved)
+            except Exception:
+                pass
+                
+    return all_carved

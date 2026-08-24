@@ -389,3 +389,30 @@ def seed_demo_data(db_path: str):
     # 7. RUN RULES ENGINE to correlate attacks & generate log-based alerts!
     run_siem_rules(db_path)
     print("[SUCCESS] Demo seed complete.")
+
+
+def seed_demo_scan_findings(db_path: str):
+    conn = get_connection(db_path)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) as cnt FROM scan_findings")
+    count = cursor.fetchone()["cnt"]
+    if count == 0:
+        # Seed Baseline Scan
+        cursor.execute("""
+            INSERT INTO scan_findings (scan_id, target, finding_hash, module_name, title, description, severity, cvss_score, cwe, raw_evidence, first_seen, last_seen, consecutive_count)
+            VALUES 
+            ('scan_baseline_01', 'https://api.sentinel-sec.internal', 'hash_sqli_01', 'sqli_scanner', 'SQL Injection in User Search Parameter', 'Unsanitized user input in search query string leads to blind SQL injection.', 'critical', 9.8, 'CWE-89', 'matched: /api/users?search=admin\' OR 1=1--', '2026-08-20T10:00:00Z', '2026-08-20T10:00:00Z', 1),
+            ('scan_baseline_01', 'https://api.sentinel-sec.internal', 'hash_ssl_01', 'ssl_auditor', 'Weak TLS Cipher Suite (RC4/3DES)', 'Target server accepts deprecated RC4 and 3DES cipher suites.', 'medium', 5.9, 'CWE-326', 'cipher: ECDHE-RSA-RC4-SHA', '2026-08-20T10:00:00Z', '2026-08-20T10:00:00Z', 1),
+            ('scan_baseline_01', 'https://api.sentinel-sec.internal', 'hash_xss_fixed_01', 'xss_scanner', 'Reflected Cross-Site Scripting (XSS)', 'Search field reflected unescaped HTML script tags.', 'high', 7.2, 'CWE-79', 'payload: <script>alert(1)</script>', '2026-08-20T10:00:00Z', '2026-08-20T10:00:00Z', 1)
+        """)
+        
+        # Seed Active Scan (SQLi still open, XSS resolved, SSL upgraded to high, New CORS finding)
+        cursor.execute("""
+            INSERT INTO scan_findings (scan_id, target, finding_hash, module_name, title, description, severity, cvss_score, cwe, raw_evidence, first_seen, last_seen, consecutive_count)
+            VALUES 
+            ('scan_active_02', 'https://api.sentinel-sec.internal', 'hash_sqli_01', 'sqli_scanner', 'SQL Injection in User Search Parameter', 'Unsanitized user input in search query string leads to blind SQL injection.', 'critical', 9.8, 'CWE-89', 'matched: /api/users?search=admin\' OR 1=1--', '2026-08-20T10:00:00Z', '2026-08-24T18:00:00Z', 2),
+            ('scan_active_02', 'https://api.sentinel-sec.internal', 'hash_ssl_01', 'ssl_auditor', 'Weak TLS Cipher Suite (RC4/3DES)', 'Target server accepts deprecated RC4 and 3DES cipher suites.', 'high', 7.5, 'CWE-326', 'cipher: ECDHE-RSA-RC4-SHA (Escalated in production)', '2026-08-20T10:00:00Z', '2026-08-24T18:00:00Z', 2),
+            ('scan_active_02', 'https://api.sentinel-sec.internal', 'hash_cors_new_01', 'cors_probe', 'Overly Permissive CORS Access-Control-Allow-Origin: *', 'API endpoint responds with wildcard origin allow header reflecting credentials.', 'high', 7.5, 'CWE-942', 'header: Access-Control-Allow-Origin: *', '2026-08-24T18:00:00Z', '2026-08-24T18:00:00Z', 1)
+        """)
+        conn.commit()
+    conn.close()
