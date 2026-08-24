@@ -1,0 +1,23 @@
+192.168.1.100 - - [17/Aug/2026:17:00:01 +0000] "GET /index.html HTTP/1.1" 200 4531 "http://localhost/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+192.168.1.100 - - [17/Aug/2026:17:00:15 +0000] "GET /static/js/main.js HTTP/1.1" 200 120531 "http://localhost/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+192.168.1.100 - - [17/Aug/2026:17:00:20 +0000] "GET /static/css/main.css HTTP/1.1" 200 4502 "http://localhost/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+192.168.1.100 - - [17/Aug/2026:17:01:00 +0000] "GET /api/status HTTP/1.1" 200 45 "http://localhost/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+# Simulation: IP 10.0.0.5 triggers Brute Force rule (5 failed logins to a single account in 5 minutes)
+10.0.0.5 - john_doe [17/Aug/2026:17:10:01 +0000] "POST /api/login HTTP/1.1" 401 54 "http://localhost/login" "Mozilla/5.0 (Windows; U; MSIE 9.0; WIndows NT 9.0; en-US)"
+10.0.0.5 - john_doe [17/Aug/2026:17:10:30 +0000] "POST /api/login HTTP/1.1" 401 54 "http://localhost/login" "Mozilla/5.0 (Windows; U; MSIE 9.0; WIndows NT 9.0; en-US)"
+10.0.0.5 - john_doe [17/Aug/2026:17:11:15 +0000] "POST /api/login HTTP/1.1" 401 54 "http://localhost/login" "Mozilla/5.0 (Windows; U; MSIE 9.0; WIndows NT 9.0; en-US)"
+10.0.0.5 - john_doe [17/Aug/2026:17:12:02 +0000] "POST /api/login HTTP/1.1" 401 54 "http://localhost/login" "Mozilla/5.0 (Windows; U; MSIE 9.0; WIndows NT 9.0; en-US)"
+10.0.0.5 - john_doe [17/Aug/2026:17:12:45 +0000] "POST /api/login HTTP/1.1" 401 54 "http://localhost/login" "Mozilla/5.0 (Windows; U; MSIE 9.0; WIndows NT 9.0; en-US)"
+10.0.0.5 - john_doe [17/Aug/2026:17:13:30 +0000] "POST /api/login HTTP/1.1" 401 54 "http://localhost/login" "Mozilla/5.0 (Windows; U; MSIE 9.0; WIndows NT 9.0; en-US)"
+
+# Simulation: IP 172.16.50.22 triggers Credential Stuffing rule (>3 distinct accounts in 5 minutes)
+172.16.50.22 - root [17/Aug/2026:17:20:00 +0000] "POST /api/login HTTP/1.1" 401 54 "http://localhost/login" "Mozilla/5.0"
+172.16.50.22 - admin [17/Aug/2026:17:20:15 +0000] "POST /api/login HTTP/1.1" 401 54 "http://localhost/login" "Mozilla/5.0"
+172.16.50.22 - support [17/Aug/2026:17:20:30 +0000] "POST /api/login HTTP/1.1" 401 54 "http://localhost/login" "Mozilla/5.0"
+172.16.50.22 - manager [17/Aug/2026:17:20:45 +0000] "POST /api/login HTTP/1.1" 401 54 "http://localhost/login" "Mozilla/5.0"
+
+# Successful logins and general traffic
+192.168.1.150 - sales_rep [17/Aug/2026:17:25:00 +0000] "POST /api/login HTTP/1.1" 200 1204 "http://localhost/login" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+192.168.1.150 - sales_rep [17/Aug/2026:17:25:10 +0000] "GET /api/dashboard HTTP/1.1" 200 4053 "http://localhost/dashboard" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+192.168.1.150 - sales_rep [17/Aug/2026:17:30:00 +0000] "GET /api/reports/sales.pdf HTTP/1.1" 200 985023 "http://localhost/reports" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"

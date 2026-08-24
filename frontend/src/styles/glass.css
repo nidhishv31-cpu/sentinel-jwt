@@ -1,0 +1,87 @@
+/* Frosted Glassmorphism Card Style */
+.glass-panel {
+  background: rgba(10, 12, 22, 0.45);
+  backdrop-filter: blur(16px) saturate(120%);
+  -webkit-backdrop-filter: blur(16px) saturate(120%);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+}
+
+.glass-panel-hover {
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.glass-panel-hover:hover {
+  transform: translateY(-4px);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.6), 0 0 15px rgba(0, 210, 255, 0.1);
+}
+
+/* Accent Glow Borders */
+.glow-blue {
+  border-color: rgba(0, 210, 255, 0.2);
+  box-shadow: 0 0 15px rgba(0, 210, 255, 0.05);
+}
+
+.glow-purple {
+  border-color: rgba(157, 0, 255, 0.2);
+  box-shadow: 0 0 15px rgba(157, 0, 255, 0.05);
+}
+
+/* Floating Animations */
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+.floating {
+  animation: float 5s ease-in-out infinite;
+}
+
+/* 3D Perspective Layout */
+.spatial-container {
+  perspective: 1200px;
+}
+
+.spatial-card {
+  transform: rotateX(2deg) rotateY(-1deg);
+  transform-style: preserve-3d;
+  transition: transform 0.5s ease;
+}
+
+.spatial-card:hover {
+  transform: rotateX(0deg) rotateY(0deg);
+}
+
+/* Glow Background Effects */
+.bg-glow-orb {
+  position: absolute;
+  width: 300px;
+  height: 300px;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.15;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Shimmer animation for parsing progress */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.shimmer-bg {
+  background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}

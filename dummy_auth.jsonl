@@ -1,0 +1,9 @@
+{"timestamp": "2026-08-17T17:00:00Z", "source_ip": "192.168.1.100", "details": {"username": "john_doe", "status_code": 200, "endpoint": "/api/auth/token"}}
+{"timestamp": "2026-08-17T17:01:00Z", "source_ip": "192.168.1.100", "details": {"endpoint": "/api/users/profile", "status_code": 200}}
+{"timestamp": "2026-08-17T17:15:00Z", "source_ip": "203.0.113.45", "details": {"username": "alice", "status_code": 401, "endpoint": "/api/auth/token", "reason": "invalid_credentials"}}
+{"timestamp": "2026-08-17T17:15:20Z", "source_ip": "203.0.113.45", "details": {"username": "alice", "status_code": 401, "endpoint": "/api/auth/token", "reason": "invalid_credentials"}}
+{"timestamp": "2026-08-17T17:15:40Z", "source_ip": "203.0.113.45", "details": {"username": "alice", "status_code": 401, "endpoint": "/api/auth/token", "reason": "invalid_credentials"}}
+{"timestamp": "2026-08-17T17:16:00Z", "source_ip": "203.0.113.45", "details": {"username": "alice", "status_code": 401, "endpoint": "/api/auth/token", "reason": "invalid_credentials"}}
+{"timestamp": "2026-08-17T17:16:20Z", "source_ip": "203.0.113.45", "details": {"username": "alice", "status_code": 401, "endpoint": "/api/auth/token", "reason": "invalid_credentials"}}
+{"timestamp": "2026-08-17T17:16:40Z", "source_ip": "203.0.113.45", "details": {"username": "alice", "status_code": 401, "endpoint": "/api/auth/token", "reason": "invalid_credentials"}}
+{"timestamp": "2026-08-17T17:25:00Z", "source_ip": "198.51.100.12", "details": {"username": "bob_admin", "status_code": 200, "endpoint": "/api/auth/token"}}
