@@ -1086,3 +1086,123 @@ class DiffRequest(BaseModel):
 def compute_scan_diff(req: DiffRequest):
     """Module 9: Performs 4-way baseline comparison (New, Resolved, Still-Open, Changed-Severity)."""
     return perform_baseline_diff(req.baseline_findings, req.current_findings)
+
+
+# ==============================================================================
+# MODULE 13: WEB ZENMAP / NMAP STUDIO ENDPOINTS
+# ==============================================================================
+
+from backend.nmap_engine import (
+    validate_scan_target, validate_and_build_custom_flags,
+    NmapScanJob, _ACTIVE_NMAP_JOBS, execute_nmap_scan_async,
+    compute_radial_topology_coordinates, parse_nmap_xml_string,
+    ZENMAP_PROFILES
+)
+
+class NmapScanRequest(BaseModel):
+    target: str
+    profile: str = "quick_scan"
+    custom_params: Optional[Dict[str, Any]] = None
+
+@app.get("/api/nmap/profiles")
+def get_nmap_profiles():
+    """Module 13: Lists structured Zenmap scan profiles."""
+    return list(ZENMAP_PROFILES.values())
+
+@app.post("/api/nmap/scan")
+async def start_nmap_scan(req: NmapScanRequest):
+    """Module 13: Validates input, constructs immutable flags, and launches scan in background."""
+    try:
+        clean_target = validate_scan_target(req.target)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+        
+    if req.profile in ZENMAP_PROFILES:
+        flags = list(ZENMAP_PROFILES[req.profile]["flags"])
+    elif req.profile == "custom_builder" and req.custom_params:
+        try:
+            flags = validate_and_build_custom_flags(req.custom_params)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    else:
+        flags = list(ZENMAP_PROFILES["quick_scan"]["flags"])
+
+    scan_id = f"nmap_{uuid.uuid4().hex[:8]}"
+    job = NmapScanJob(scan_id, clean_target, req.profile, flags)
+    _ACTIVE_NMAP_JOBS[scan_id] = job
+
+    # Launch in background async task
+    asyncio.create_task(execute_nmap_scan_async(job))
+    
+    return {
+        "scan_id": scan_id,
+        "target": clean_target,
+        "profile": req.profile,
+        "flags": flags,
+        "status": "initializing"
+    }
+
+@app.get("/api/nmap/status/{scan_id}")
+def get_nmap_scan_status(scan_id: str):
+    """Module 13: Returns incremental scan progress, discovered hosts, and engine details."""
+    job = _ACTIVE_NMAP_JOBS.get(scan_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Nmap scan not found.")
+        
+    return {
+        "scan_id": job.scan_id,
+        "target": job.target,
+        "profile": job.profile,
+        "flags": job.flags,
+        "status": job.status,
+        "progress": job.progress,
+        "engine_type": job.engine_type,
+        "hosts_count": len(job.hosts),
+        "hosts": job.hosts,
+        "raw_output": job.raw_output[-5000:] if job.raw_output else "",
+        "error": job.error,
+        "elapsed_seconds": round((job.end_time or time.time()) - job.start_time, 1)
+    }
+
+@app.get("/api/nmap/topology/{scan_id}")
+def get_nmap_topology(scan_id: str):
+    """Module 13: Computes server-side radial coordinate positions for Zenmap visualization."""
+    job = _ACTIVE_NMAP_JOBS.get(scan_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Nmap scan not found.")
+        
+    return compute_radial_topology_coordinates(job.hosts, origin_label=f"Scanner ➔ {job.target}")
+
+@app.post("/api/nmap/cancel/{scan_id}")
+def cancel_nmap_scan(scan_id: str):
+    """Module 13: Cleanly terminates active Nmap process and prevents zombie tasks."""
+    job = _ACTIVE_NMAP_JOBS.get(scan_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Nmap scan not found.")
+    job.cancel()
+    return {"scan_id": scan_id, "status": "cancelled"}
+
+@app.post("/api/nmap/import-xml")
+async def import_nmap_xml(file: UploadFile = File(...)):
+    """Module 13: Safely imports external Nmap XML scan results with entity resolution protection."""
+    content_bytes = await file.read(10 * 1024 * 1024) # Cap at 10MB
+    xml_str = content_bytes.decode("utf-8", errors="ignore")
+    
+    hosts = parse_nmap_xml_string(xml_str)
+    if not hosts:
+        raise HTTPException(status_code=400, detail="Could not parse valid host records from uploaded XML.")
+        
+    scan_id = f"imported_{uuid.uuid4().hex[:8]}"
+    job = NmapScanJob(scan_id, file.filename or "imported_scan.xml", "imported", [])
+    job.hosts = hosts
+    job.status = "completed"
+    job.progress = 100
+    job.engine_type = "imported-xml"
+    _ACTIVE_NMAP_JOBS[scan_id] = job
+    
+    return {
+        "scan_id": scan_id,
+        "hosts_count": len(hosts),
+        "status": "completed",
+        "topology": compute_radial_topology_coordinates(hosts)
+    }
