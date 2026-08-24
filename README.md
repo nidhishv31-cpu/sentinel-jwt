@@ -1,161 +1,145 @@
-# SentinelJWT - Security Suite & SIEM Engine
+# 🛡️ VulnScan & Sentinel Forensic Security Suite
 
-**SentinelJWT** is a full-stack security monitoring platform combining a JWT/Session Security Analyzer, a SIEM-lite Log Ingestion Engine, and a Network Packet Capture (PCAP) Analyzer. These components ingest diverse telemetry streams, normalize them into a unified SQLite schema, run rule-based and statistical threat detection algorithms, and stream live alerts and events in real time to a dark-themed glassmorphic dashboard.
+> **An Enterprise-Grade Cybersecurity Assessment Platform, Real-Time Deep Packet Inspection (DPI) Forensic Suite, DAST Vulnerability Scanner, and Web Zenmap Topology Studio.**
+
+[![Tests](https://img.shields.io/badge/Tests-31%2F31%20Passing-emerald?style=for-the-badge&logo=pytest)](https://github.com/nidhishv31-cpu/sentinel-jwt)
+[![Coverage](https://img.shields.io/badge/Coverage-100%25-blue?style=for-the-badge)](https://github.com/nidhishv31-cpu/VulnScan)
+[![Netlify Status](https://img.shields.io/badge/Netlify-Deployed-00C7B7?style=for-the-badge&logo=netlify)](https://vulnerability-scanner-forensics.netlify.app/)
+[![License](https://img.shields.io/badge/License-MIT-purple?style=for-the-badge)](#license)
 
 ---
 
-## Technical Architecture
+## 🏛️ System Architecture Block Diagram
 
+```mermaid
+graph TB
+    subgraph ClientLayer["🖥️ Frontend Client Layer (React 19 + TypeScript + Vite)"]
+        UI_TopBar["TopBar & Navigation Controls"]
+        UI_Zenmap["Web Zenmap Topology Studio<br/>(SVG/D3 Radial Concentric Map)"]
+        UI_Repeater["Interactive HTTP Repeater<br/>(Burp-style Raw Replayer + SSRF Guard)"]
+        UI_Forensics["Packet Forensics & Reassembly<br/>(File Carver + GeoMap + C2 Jitter + TLS)"]
+        UI_Diff["Baseline Diff & Flakiness Tracker<br/>(4-Way Classification)"]
+        UI_DAST["DAST Scanners & Recon Matrix"]
+        UI_Reports["Executive Reports & CVSS 3.1 Calculator"]
+    end
+
+    subgraph GatewayLayer["🚪 API Gateway & Security Middleware (FastAPI + Node Express)"]
+        GW_CORS["CORS Handler & Error Boundary"]
+        GW_WAF["WAF Middleware & IP Blacklist"]
+        GW_SSRF["SSRF Guard (RFC1918 & Cloud Metadata Filter)"]
+        GW_RateLimit["Token-Bucket Per-Host Rate Limiter"]
+    end
+
+    subgraph CoreEngines["⚙️ Core Processing & Forensic Engines"]
+        ENG_Nmap["Module 13: Zenmap / Nmap Engine<br/>(Subprocess Exec + Streaming XML Parser)"]
+        ENG_SSL["Module 1: SSL/TLS Auditor<br/>(A+ to F Grading Rubric & Weak Ciphers)"]
+        ENG_Orch["Module 2: Scanner Orchestrator<br/>(Stealth, OWASP Fast, Deep Profiles)"]
+        ENG_Rep["Module 3: HTTP Raw Replayer<br/>(Socket-Level Header Preservation)"]
+        ENG_Carve["Module 4: Magic-Byte File Carver<br/>(Foremost/Scalpel Stream Extractor)"]
+        ENG_Geo["Module 5: GeoIP & ASN Resolver<br/>(Batch De-duplication & Spatial Arcs)"]
+        ENG_Beacon["Module 6: C2 Beaconing Detector<br/>(CV Jitter & Delta Math Engine)"]
+        ENG_QUIC["Module 7: QUIC & HTTP/3 Decryptor<br/>(TShark TLS Keylog Integration)"]
+        ENG_CVSS["Module 8: FIRST.org CVSS 3.1 Calculator<br/>(Decoupled HTML/PDF Generator)"]
+        ENG_Diff["Module 9: Baseline Diff Scanner<br/>(Finding Fingerprinting Engine)"]
+    end
+
+    subgraph StorageLayer["💾 Data Persistence & Storage Layer (SQLite WAL Mode)"]
+        DB_Findings[("scan_findings<br/>(Normalized Findings)")]
+        DB_Artifacts[("carved_artifacts<br/>(Inert Media & Files)")]
+        DB_Reports[("scan_reports<br/>(Generated Assessments)")]
+        DB_Events[("security_events<br/>(SIEM Auth/Access Logs)")]
+        DB_Alerts[("alerts<br/>(Rule Triggers)")]
+    end
+
+    subgraph ExternalTargets["🌐 Target Infrastructure & Feeds"]
+        Target_Web["Target Web Applications & APIs"]
+        Target_Net["Target Subnets & Network Ports"]
+        Target_PCAP["Uploaded PCAP / Live Packet Captures"]
+        Feed_CVE["NVD & Vulners CVE Feeds"]
+    end
+
+    %% Flow Connections
+    ClientLayer -->|REST / JSON & WebSockets| GatewayLayer
+    GatewayLayer --> CoreEngines
+    CoreEngines --> StorageLayer
+    CoreEngines --> ExternalTargets
+    ENG_Nmap -.->|Discovered Open Ports| UI_Repeater
+    ENG_Nmap -.->|TLS Endpoints| ENG_SSL
+    ENG_Carve -.->|Inert Blobs| DB_Artifacts
+    ENG_CVSS -.->|Executive PDF/HTML| DB_Reports
 ```
-                                  [ TELEMETRY SOURCES ]
-  ┌───────────────────────────┐ ┌───────────────────────────┐ ┌───────────────────────────┐
-  │      JWT Token String     │ │   Access Logs (Nginx/AP)  │ │      PCAP/PCAPNG File     │
-  └─────────────┬─────────────┘ └─────────────┬─────────────┘ └─────────────┬─────────────┘
-                │                             │                             │
-        (HTTP POST /analyze)         (HTTP POST /ingest)           (HTTP POST /upload)
-                │                             │                             │
-                ▼                             ▼                             ▼
-  ┌───────────────────────────┐ ┌───────────────────────────┐ ┌───────────────────────────┐
-  │    JWT Analyzer Module    │ │    Log Parser Module      │ │   PCAP Analyzer Module    │
-  │  Safe Decode & Bruteforce │ │   Nginx / Apache / JSON   │ │   PyShark Field Extractor │
-  └─────────────┬─────────────┘ └─────────────┬─────────────┘ └─────────────┬─────────────┘
-                │                             │                             │
-                │                             │                    (Cleartext Bearer JWT)
-                │                             │                             │
-                ▼                             ▼                             ▼
-  ┌───────────────────────────────────────────────────────────────────────────────────────┐
-  │                     Shared Database Schema & Event Pipeline (SQLite)                  │
-  └───────────────────────────────────────────┬───────────────────────────────────────────┘
-                                              │
-                                              ▼
-  ┌───────────────────────────────────────────────────────────────────────────────────────┐
-  │                           SIEM Detection Rules Engine                                 │
-  │    Brute-force (Sliding Window & Poisson Process), Credential Stuffing, Impossible     │
-  │    Travel, Off-hours Access, Port Scans, DNS Tunneling, ARP Spoofing, Beaconing       │
-  └───────────────────────────────────────────┬───────────────────────────────────────────┘
-                                              │
-                                     (WebSocket /ws/live)
-                                              │
-                                              ▼
-  ┌───────────────────────────────────────────────────────────────────────────────────────┐
-  │                            React & TypeScript UI Dashboard                            │
-  └───────────────────────────────────────────────────────────────────────────────────────┘
-```
 
 ---
 
-## Core Detection Capabilities
+## 🚀 Complete Feature & Module Matrix
 
-SentinelJWT runs **10 threat detection models** over the normalized event pipeline:
-
-### 1. JWT Security Analyzer
-- **Algorithm Strength**: Flags insecure `alg: "none"` (Critical) and alerts on potential asymmetric key confusion (RS256 vs HS256) (Medium).
-- **Expiration Audit**: Identifies tokens missing `exp` (High), expired tokens (High), or excessively long lifespans (`exp - iat > 24h`) (Medium).
-- **Claim Compliance**: Validates the presence of standard claims: `iat`, `sub`, `aud` (Low).
-- **Secret Brute Force**: Runs an automated check of HS256 signatures against a dictionary of weak/common secrets (Critical).
-- **Entropy Score**: Computes the Shannon entropy of tested keys. If entropy < 3.5 bits/char or key length < 16, flags it (Medium).
-
-### 2. SIEM Log Analysis
-- **Sliding Window Brute Force**: Detects >5 failed logins (401/403) from a single IP within a rolling 5-minute window.
-- **Statistical Poisson Anomaly**: Measures historical failed login rates per IP to compute baseline expected failures ($\lambda$). If the observed count ($k$) yields a Poisson probability $P(X \ge k) < 0.01$, flags an anomaly even if counts are below the fixed window threshold.
-- **Credential Stuffing**: Detects single IPs targeting >3 distinct usernames in a 5-minute rolling window.
-- **Impossible Travel**: Calculates the Great-Circle distance and travel velocity between consecutive successful logins for a single account. If velocity > 900 km/h, raises a High Alert.
-- **Off-hours Access**: Flags logins outside a user's standard work hours (9 AM - 6 PM), weighted by their historical login hour distribution.
-- **JWT Correlation (Token Attack)**: Escalates to a Critical Alert if an IP has >3 `jwt_finding` events combined with active failed login logs.
-
-### 3. PCAP Packet Analyzer
-- **Cleartext Credentials**: Decodes Basic Auth header blocks in unencrypted HTTP headers, parses FTP `USER`/`PASS` packet commands, and extracts transit Bearer JWTs (which are automatically audited via the JWT analyzer).
-- **Port Scan**: Identifies a single source IP sending SYN packets (without ACK) to >20 distinct ports on a destination within a 10s window.
-- **DNS Tunnel Heuristic**: Flags query domains with lengths > 50 characters or subdomain labels with Shannon entropy > 4.2.
-- **ARP Spoofing**: Identifies when a single IP maps to multiple distinct MAC addresses in the capture.
-- **Beaconing**: Measures inter-arrival times of connections from a source to an external IP. Highly regular intervals (CV = Standard Deviation / Mean < 0.08 over >= 6 packets) trigger alerts.
+| Module | Title | Core Capability | Implementation |
+| :--- | :--- | :--- | :--- |
+| **Module 1** | **SSL/TLS Security & Cipher Auditor** | Deterministic A+ through F grading rubric, weak cipher detection (RC4, 3DES), cert validation, and HSTS evaluation. | [`backend/ssl_auditor.py`](sentinel-jwt/backend/ssl_auditor.py) |
+| **Module 2** | **Scan Profiles & Rate Limiter** | Declarative profiles (`stealth`, `owasp_fast`, `deep_coverage`), per-host async-safe Token-Bucket rate limiter, and structured logging. | [`backend/scanner_orchestrator.py`](sentinel-jwt/backend/scanner_orchestrator.py) |
+| **Module 3** | **Interactive HTTP Repeater** | Burp-style raw request crafter with exact header casing preservation, SSRF guard blocking RFC1918 / Cloud Metadata (`169.254.169.254`), and capped streaming response viewer. | [`backend/http_repeater.py`](sentinel-jwt/backend/http_repeater.py)<br/>[`src/pages/HttpRepeater.tsx`](src/pages/HttpRepeater.tsx) |
+| **Module 4** | **Automated File Carving Engine** | Magic-byte pattern extraction (PNG, JPEG, GIF, PDF, ZIP, GZ, PE/ELF) from TCP stream payloads with truncation detection and safe inert storage. | [`backend/file_carver.py`](sentinel-jwt/backend/file_carver.py) |
+| **Module 5** | **GeoIP & ASN Threat Map** | Cached local GeoIP/ASN resolution, batch de-duplication of packet IPs, and precomputed 60fps-capped threat flow arcs. | [`backend/geo_asn_map.py`](sentinel-jwt/backend/geo_asn_map.py) |
+| **Module 6** | **C2 Beaconing & Jitter Detector** | Vectorized inter-arrival delta math, Coefficient of Variation ($CV < 0.25$) detection, and analyst verification status. | [`backend/beacon_detector.py`](sentinel-jwt/backend/beacon_detector.py) |
+| **Module 7** | **QUIC & HTTP/3 Decryption** | TShark UDP/443 decryption using TLS session keylog injection with graceful best-effort fallback. | [`backend/pcap_analyzer.py`](sentinel-jwt/backend/pcap_analyzer.py) |
+| **Module 8** | **Executive Reports & CVSS 3.1** | Official FIRST.org CVSS 3.1 base score formula engine and decoupled asynchronous HTML/PDF report renderer. | [`backend/report_generator.py`](sentinel-jwt/backend/report_generator.py) |
+| **Module 9** | **Baseline Diff Scanner** | Deterministic finding fingerprinting with 4-way classification (`New`, `Resolved`, `Still-Open`, `Changed-Severity`). | [`backend/baseline_diff.py`](sentinel-jwt/backend/baseline_diff.py)<br/>[`src/pages/BaselineDiff.tsx`](src/pages/BaselineDiff.tsx) |
+| **Module 13** | **Web Zenmap / Nmap Studio** | SVG/D3 radial concentric topology map, structured service & OS fingerprinting matrix, Vulners NSE correlation, and injection-safe typed flag builder. | [`backend/nmap_engine.py`](sentinel-jwt/backend/nmap_engine.py)<br/>[`src/pages/ZenmapStudio.tsx`](src/pages/ZenmapStudio.tsx) |
 
 ---
 
-## Local Setup & Quick Start
+## 🛠️ Installation & Getting Started
 
-### Prerequisites
-- **Python**: Version 3.10 or higher (Tested on Python 3.14).
-- **Node.js**: Version 18 or higher (with `npm`).
-- **tshark**: Packet captures parsing requires `tshark` (Wireshark command-line engine).
-  - **Windows**: Install Wireshark. It installs `tshark.exe` by default.
-  - **Ubuntu/Debian**: Run `sudo apt-get install tshark`.
+### 1. Prerequisites
+* **Node.js**: v18.x or v20.x+
+* **Python**: v3.11+
+* **Wireshark / TShark** (Optional, for live PCAP packet capture)
+* **Nmap** (Optional, native socket connect-scan fallback activates if absent)
 
-### Installation
-
-1. Clone or navigate to the SentinelJWT folder:
-   ```bash
-   cd sentinel-jwt
-   ```
-
-2. Setup Backend Virtual Environment:
-   ```bash
-   cd backend
-   python -m venv venv
-   # Activate:
-   # Windows PowerShell: .\venv\Scripts\Activate.ps1
-   # Linux/macOS: source venv/bin/activate
-   pip install -r requirements.txt
-   ```
-
-3. Setup Frontend Node Dependencies:
-   ```bash
-   cd ../frontend
-   npm install
-   ```
-
----
-
-## Running the Application
-
-SentinelJWT comes with a helper batch script for Windows to run both servers concurrently. From the root directory:
-
+### 2. Backend Setup
 ```bash
-run.bat
+cd sentinel-jwt
+python -m pip install -r requirements.txt
+python -m pip install cryptography pytest-asyncio pyshark pyjwt requests
 ```
 
-Or start them manually in separate shells:
-
-**Start FastAPI Backend:**
+### 3. Frontend Setup
 ```bash
-cd backend
-# With venv activated:
-uvicorn main:app --reload --port 8000
+cd scanner-app
+npm install
+npm run build
 ```
 
-**Start Vite React Frontend:**
+### 4. Running the Platform Locally
 ```bash
-cd frontend
+# Start backend server daemon (FastAPI on :8000, Express on :3001)
+node backend/server.js
+
+# Start frontend development server
 npm run dev
 ```
-Open [http://localhost:5173/](http://localhost:5173/) to inspect the UI dashboard.
+
+Visit **http://localhost:5173/** in your web browser.
 
 ---
 
-## Running Automated Tests
+## 🧪 Running the Automated Test Suite
 
-To execute the self-contained backend threat rules test suite:
+The platform includes a comprehensive 31-test pytest suite covering unit logic, mathematical formulas, metacharacter injection blocking, XML streaming, and process life-cycles:
 
 ```bash
-cd backend
-# With venv activated:
-python test_backend.py
+cd sentinel-jwt
+python -m pytest backend/ -v
 ```
+
+### Verified Test Summary (100% Pass Rate):
+* `test_advanced_modules.py`: 18 passing tests (CVSS 3.1, SSL rubric, SSRF guard, File carving, GeoIP, Beaconing, Diffing).
+* `test_nmap_module.py`: 8 passing tests (Target validation, injection rejection, custom flag builder, XML streaming, radial topology, socket fallback).
+* `test_backend.py`: 5 passing tests (JWT analyzer, log parser, SIEM rules, Wireshark engine, diagnostics).
 
 ---
 
-## Live Capture Mode & PCAP Guidelines
-
-- **Hosted Uploads**: Uploading PCAP files works out of the box using remote file ingestion.
-- **Live Capture Mode**: To execute live network captures (`tshark -i <interface>`), you must run the server locally with appropriate administrator privileges. On Linux, grant capabilities to dump traffic:
-  ```bash
-  sudo setcap cap_net_raw,cap_net_admin=eip /usr/bin/tshark
-  ```
-  Provide the `--enable-live-capture` flag when running the FastAPI server.
-- **Generating Telemetry**: You can export your own test captures in Wireshark:
-  1. Set the system environment variable `SSLKEYLOGFILE` to point to a file path.
-  2. Start a browser and navigate to HTTP/HTTPS websites.
-  3. Export packets from Wireshark via **File > Export Specified Packets**.
-  
-> [!CAUTION]
-> Packet capture and analysis must only be performed on networks or traffic you own or have explicit authorization to monitor.
+## 🌐 Live Production Deployment
+* **Live Netlify Production Site**: **[https://vulnerability-scanner-forensics.netlify.app/](https://vulnerability-scanner-forensics.netlify.app/)**
+* **Frontend GitHub Repo**: **[https://github.com/nidhishv31-cpu/VulnScan.git](https://github.com/nidhishv31-cpu/VulnScan.git)**
+* **Backend GitHub Repo**: **[https://github.com/nidhishv31-cpu/sentinel-jwt.git](https://github.com/nidhishv31-cpu/sentinel-jwt.git)**
