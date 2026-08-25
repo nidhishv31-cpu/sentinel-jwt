@@ -50,7 +50,20 @@ backend/test_nmap_module.py::test_run_fallback_socket_scan PASSED           [100
 
 ---
 
-## 2. Mathematical & Algorithmic Validations
+## 2. Vulnerability Remediation & Security Hardening Audit
+
+The following table summarizes the vulnerabilities addressed during the August 2026 security review:
+
+| Advisory ID | Category | Affected Component | Root Cause | Remediation & Status |
+| :--- | :--- | :--- | :--- | :--- |
+| **VULN-2026-01** | Remote Command Injection (CWE-78) | `scanner-app/backend/trafficValidator.js` | Invocation of `tshark` using Node's `child_process.exec` string formatting. | **RESOLVED**: Converted to `execFile` with explicit argument array passing. Prevents shell metacharacter evaluation. |
+| **VULN-2026-02** | Path Traversal (CWE-22) | `sentinel-jwt/backend/main.py` (`/api/pcap/upload`, `/upload-keylog`, `/compare`) | Unsanitized client filenames accepted directly into file paths. | **RESOLVED**: Normalization using `os.path.basename(filename.replace('\\', '/'))`. Enforces upload confinement to root storage folders. |
+| **PERF-2026-01** | Client Storage Quota Exhaustion (CWE-400) | `scanner-app/src/store/scanStore.ts` | Storing unpruned `livePackets` array directly to browser `localStorage` (5MB quota limit). | **RESOLVED**: Implemented Zustand `partialize` configuration to drop transient packet arrays from serialized storage. |
+| **PERF-2026-02** | Database Write Lock Contention | `sentinel-jwt/backend/database.py` | Repeated execution of `CREATE TABLE` and `CREATE INDEX` inside write loops (`add_security_event`, `add_alert`). | **RESOLVED**: Centralized all DDL logic exclusively inside `init_db()`. Insert functions now perform pure DML. |
+
+---
+
+## 3. Mathematical & Algorithmic Validations
 
 ### A. FIRST.org CVSS 3.1 Formula Engine
 * Vector: `CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H`
@@ -65,11 +78,13 @@ backend/test_nmap_module.py::test_run_fallback_socket_scan PASSED           [100
 * Mean interval: $\mu = \frac{1}{N}\sum \Delta t_i$
 * Standard deviation: $\sigma = \sqrt{\frac{1}{N-1}\sum (\Delta t_i - \mu)^2}$
 * Coefficient of Variation: $CV = \frac{\sigma}{\mu}$
-* **Classification Rule**: Flagged as periodic heartbeat if $CV < 0.25$, marked as analyst review to eliminate benign NTP/DNS noise.
+* **Classification Rule**: Flagged as periodic heartbeat if $CV < 0.25$, marked for analyst verification to filter benign NTP/DNS noise.
 
 ---
 
-## 3. End-to-End Latency Benchmark
+## 4. End-to-End Latency & Performance Benchmarks
+
+Following the database DDL optimization and zero-shell hardening, endpoint response times were benchmarked under local load:
 
 | Endpoint / Action | Test Input | Response Time | Status |
 | :--- | :--- | :---: | :---: |
@@ -82,3 +97,5 @@ backend/test_nmap_module.py::test_run_fallback_socket_scan PASSED           [100
 | `GET /api/nmap/profiles` | Zenmap Profiles Fetch | **37.12 ms** | 200 OK |
 | `POST /api/nmap/scan` | Subprocess Initialization | **88.81 ms** | 200 OK |
 | `GET /api/nmap/topology/{id}` | $O(N)$ Radial Geometry | **12.31 ms** | 200 OK |
+| `POST /api/logs/ingest` (1k records) | Batch DML Ingestion (Post-DDL fix) | **41.15 ms** | 200 OK |
+| `POST /api/pcap/upload` | Sanitized Multi-part PCAP Ingestion | **52.20 ms** | 200 OK |

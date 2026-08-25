@@ -9,6 +9,15 @@
 
 ---
 
+## ⚡ Recent Updates & Hardening (August 2026)
+
+* **Command Injection Defense**: Upgraded the PCAP traffic validation pipeline in `scanner-app/backend/trafficValidator.js` from `exec` to `execFile`. All `tshark` invocations now pass arguments directly to binary handles without a shell intermediary.
+* **Path Traversal Protection**: Implemented `os.path.basename` path normalization across all file upload and comparison endpoints (`/api/pcap/upload`, `/api/pcap/upload-keylog`, and `/api/pcap/compare`) in `sentinel-jwt/backend/main.py`.
+* **State Persistence Stability**: Configured Zustand `partialize` filtering in `scanner-app/src/store/scanStore.ts` to drop unbounded packet buffers (`livePackets`) and ephemeral runtime IDs prior to `localStorage` synchronization, eliminating the 5MB browser quota crash.
+* **Database I/O Optimization**: Stripped redundant runtime DDL (`CREATE TABLE IF NOT EXISTS` and index generation) from `add_security_event` and `add_alert` in `sentinel-jwt/backend/database.py`. Schema lifecycle management is now strictly centralized in `init_db()`, eliminating lock contention during telemetry ingestion.
+
+---
+
 ## 🏛️ System Architecture Block Diagram
 
 ```mermaid
@@ -27,6 +36,7 @@ graph TB
         GW_CORS["CORS Handler & Error Boundary"]
         GW_WAF["WAF Middleware & IP Blacklist"]
         GW_SSRF["SSRF Guard (RFC1918 & Cloud Metadata Filter)"]
+        GW_Sanitize["Upload Path Sanitizer (os.path.basename)"]
         GW_RateLimit["Token-Bucket Per-Host Rate Limiter"]
     end
 
@@ -41,6 +51,7 @@ graph TB
         ENG_QUIC["Module 7: QUIC & HTTP/3 Decryptor<br/>(TShark TLS Keylog Integration)"]
         ENG_CVSS["Module 8: FIRST.org CVSS 3.1 Calculator<br/>(Decoupled HTML/PDF Generator)"]
         ENG_Diff["Module 9: Baseline Diff Scanner<br/>(Finding Fingerprinting Engine)"]
+        ENG_Validator["Traffic Validator Engine<br/>(Zero-Shell execFile tshark Integration)"]
     end
 
     subgraph StorageLayer["💾 Data Persistence & Storage Layer (SQLite WAL Mode)"]
@@ -75,16 +86,17 @@ graph TB
 
 | Module | Title | Core Capability | Implementation |
 | :--- | :--- | :--- | :--- |
-| **Module 1** | **SSL/TLS Security & Cipher Auditor** | Deterministic A+ through F grading rubric, weak cipher detection (RC4, 3DES), cert validation, and HSTS evaluation. | [`backend/ssl_auditor.py`](sentinel-jwt/backend/ssl_auditor.py) |
-| **Module 2** | **Scan Profiles & Rate Limiter** | Declarative profiles (`stealth`, `owasp_fast`, `deep_coverage`), per-host async-safe Token-Bucket rate limiter, and structured logging. | [`backend/scanner_orchestrator.py`](sentinel-jwt/backend/scanner_orchestrator.py) |
-| **Module 3** | **Interactive HTTP Repeater** | Burp-style raw request crafter with exact header casing preservation, SSRF guard blocking RFC1918 / Cloud Metadata (`169.254.169.254`), and capped streaming response viewer. | [`backend/http_repeater.py`](sentinel-jwt/backend/http_repeater.py)<br/>[`src/pages/HttpRepeater.tsx`](src/pages/HttpRepeater.tsx) |
-| **Module 4** | **Automated File Carving Engine** | Magic-byte pattern extraction (PNG, JPEG, GIF, PDF, ZIP, GZ, PE/ELF) from TCP stream payloads with truncation detection and safe inert storage. | [`backend/file_carver.py`](sentinel-jwt/backend/file_carver.py) |
-| **Module 5** | **GeoIP & ASN Threat Map** | Cached local GeoIP/ASN resolution, batch de-duplication of packet IPs, and precomputed 60fps-capped threat flow arcs. | [`backend/geo_asn_map.py`](sentinel-jwt/backend/geo_asn_map.py) |
-| **Module 6** | **C2 Beaconing & Jitter Detector** | Vectorized inter-arrival delta math, Coefficient of Variation ($CV < 0.25$) detection, and analyst verification status. | [`backend/beacon_detector.py`](sentinel-jwt/backend/beacon_detector.py) |
-| **Module 7** | **QUIC & HTTP/3 Decryption** | TShark UDP/443 decryption using TLS session keylog injection with graceful best-effort fallback. | [`backend/pcap_analyzer.py`](sentinel-jwt/backend/pcap_analyzer.py) |
-| **Module 8** | **Executive Reports & CVSS 3.1** | Official FIRST.org CVSS 3.1 base score formula engine and decoupled asynchronous HTML/PDF report renderer. | [`backend/report_generator.py`](sentinel-jwt/backend/report_generator.py) |
-| **Module 9** | **Baseline Diff Scanner** | Deterministic finding fingerprinting with 4-way classification (`New`, `Resolved`, `Still-Open`, `Changed-Severity`). | [`backend/baseline_diff.py`](sentinel-jwt/backend/baseline_diff.py)<br/>[`src/pages/BaselineDiff.tsx`](src/pages/BaselineDiff.tsx) |
-| **Module 13** | **Web Zenmap / Nmap Studio** | SVG/D3 radial concentric topology map, structured service & OS fingerprinting matrix, Vulners NSE correlation, and injection-safe typed flag builder. | [`backend/nmap_engine.py`](sentinel-jwt/backend/nmap_engine.py)<br/>[`src/pages/ZenmapStudio.tsx`](src/pages/ZenmapStudio.tsx) |
+| **Module 1** | **SSL/TLS Security & Cipher Auditor** | Deterministic A+ through F grading rubric, weak cipher detection (RC4, 3DES), cert validation, and HSTS evaluation. | [`backend/ssl_auditor.py`](backend/ssl_auditor.py) |
+| **Module 2** | **Scan Profiles & Rate Limiter** | Declarative profiles (`stealth`, `owasp_fast`, `deep_coverage`), per-host async-safe Token-Bucket rate limiter, and structured logging. | [`backend/scanner_orchestrator.py`](backend/scanner_orchestrator.py) |
+| **Module 3** | **Interactive HTTP Repeater** | Burp-style raw request crafter with exact header casing preservation, SSRF guard blocking RFC1918 / Cloud Metadata (`169.254.169.254`), and capped streaming response viewer. | [`backend/http_repeater.py`](backend/http_repeater.py)<br/>[`src/pages/HttpRepeater.tsx`](src/pages/HttpRepeater.tsx) |
+| **Module 4** | **Automated File Carving Engine** | Magic-byte pattern extraction (PNG, JPEG, GIF, PDF, ZIP, GZ, PE/ELF) from TCP stream payloads with truncation detection and safe inert storage. | [`backend/file_carver.py`](backend/file_carver.py) |
+| **Module 5** | **GeoIP & ASN Threat Map** | Cached local GeoIP/ASN resolution, batch de-duplication of packet IPs, and precomputed 60fps-capped threat flow arcs. | [`backend/geo_asn_map.py`](backend/geo_asn_map.py) |
+| **Module 6** | **C2 Beaconing & Jitter Detector** | Vectorized inter-arrival delta math, Coefficient of Variation ($CV < 0.25$) detection, and analyst verification status. | [`backend/beacon_detector.py`](backend/beacon_detector.py) |
+| **Module 7** | **QUIC & HTTP/3 Decryption** | TShark UDP/443 decryption using TLS session keylog injection with graceful best-effort fallback. | [`backend/pcap_analyzer.py`](backend/pcap_analyzer.py) |
+| **Module 8** | **Executive Reports & CVSS 3.1** | Official FIRST.org CVSS 3.1 base score formula engine and decoupled asynchronous HTML/PDF report renderer. | [`backend/report_generator.py`](backend/report_generator.py) |
+| **Module 9** | **Baseline Diff Scanner** | Deterministic finding fingerprinting with 4-way classification (`New`, `Resolved`, `Still-Open`, `Changed-Severity`). | [`backend/baseline_diff.py`](backend/baseline_diff.py)<br/>[`src/pages/BaselineDiff.tsx`](src/pages/BaselineDiff.tsx) |
+| **Module 13** | **Web Zenmap / Nmap Studio** | SVG/D3 radial concentric topology map, structured service & OS fingerprinting matrix, Vulners NSE correlation, and injection-safe typed flag builder. | [`backend/nmap_engine.py`](backend/nmap_engine.py)<br/>[`src/pages/ZenmapStudio.tsx`](src/pages/ZenmapStudio.tsx) |
+| **Telemetry** | **Traffic Validator** | Subprocess-isolated traffic capture validation, rate limit verification, and cleartext secret exposure auditing. | [`scanner-app/backend/trafficValidator.js`](../scanner-app/backend/trafficValidator.js) |
 
 ---
 

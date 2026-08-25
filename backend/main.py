@@ -309,7 +309,8 @@ async def upload_pcap(file: UploadFile = File(...)):
             )
         )
         
-    target_path = os.path.join(UPLOAD_DIR, file.filename)
+    safe_filename = os.path.basename(file.filename.replace('\\', '/'))
+    target_path = os.path.join(UPLOAD_DIR, safe_filename)
     try:
         content = await file.read()
         with open(target_path, "wb") as f:
@@ -354,7 +355,8 @@ os.makedirs(KEYS_DIR, exist_ok=True)
 @app.post("/api/pcap/upload-keylog")
 async def upload_tls_keylog(file: UploadFile = File(...)):
     """Uploads a TLS keylog file (e.g. SSLKEYLOGFILE) or RSA Private Key (.pem/.key) for live packet decryption."""
-    target_path = os.path.join(KEYS_DIR, file.filename)
+    safe_filename = os.path.basename(file.filename.replace('\\', '/'))
+    target_path = os.path.join(KEYS_DIR, safe_filename)
     try:
         content = await file.read()
         with open(target_path, "wb") as f:
@@ -422,8 +424,10 @@ def get_followed_stream(capture_id: str, stream_id: int = 0, combine_all: bool =
 
 @app.post("/api/pcap/compare")
 async def compare_captures(file1: UploadFile = File(...), file2: UploadFile = File(...)):
-    path1 = os.path.join(UPLOAD_DIR, "diff_src_" + file1.filename)
-    path2 = os.path.join(UPLOAD_DIR, "diff_dst_" + file2.filename)
+    safe_file1 = os.path.basename(file1.filename.replace('\\', '/'))
+    safe_file2 = os.path.basename(file2.filename.replace('\\', '/'))
+    path1 = os.path.join(UPLOAD_DIR, "diff_src_" + safe_file1)
+    path2 = os.path.join(UPLOAD_DIR, "diff_dst_" + safe_file2)
     try:
         with open(path1, "wb") as f:
             f.write(await file1.read())

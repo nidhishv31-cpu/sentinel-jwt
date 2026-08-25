@@ -22,12 +22,14 @@ graph TB
         UI_Forensics["Packet Forensics Suite<br/>• TShark Stream Reassembler<br/>• TLS/QUIC Decryption Studio<br/>• Foremost Magic-Byte Carver<br/>• GeoIP & ASN Threat Map<br/>• C2 Jitter Beaconing Detector"]
         UI_Diff["Baseline Diff Scanner<br/>• 4-Way Category Tracker<br/>• Flakiness Window Classifier"]
         UI_Reports["Executive Reports & CVSS 3.1<br/>• Official FIRST.org Calculator<br/>• Async HTML/PDF Generator"]
+        UI_Store["Zustand Persistence Manager<br/>• partialize Schema Filter<br/>• Quota-Safe LocalStorage Guard"]
     end
 
     subgraph GatewayTier["🚪 API Gateway & Security Boundary (FastAPI :8000 & Express :3001)"]
         GW_CORS["CORS Middleware (Allowed Origins & Methods)"]
         GW_WAF["WAF Middleware (SQLite Blocked IP Store)"]
         GW_SSRF["SSRF Guard (RFC1918 & Cloud Metadata Filter)"]
+        GW_Path["Path Traversal Guard (os.path.basename Normalization)"]
         GW_Limiter["TokenBucket Rate Limiter (Per-Host Asynchronous Limiting)"]
     end
 
@@ -42,6 +44,7 @@ graph TB
         ENG_QUIC["Module 7: QUIC/HTTP3 Decryptor<br/>• TShark Keylog Hook"]
         ENG_CVSS["Module 8: CVSS 3.1 Calculator<br/>• FIRST.org Vector Engine"]
         ENG_Diff["Module 9: Baseline Diff Engine<br/>• Stable Finding Fingerprinter"]
+        ENG_Val["Traffic Validator Engine<br/>• Zero-Shell execFile Parser<br/>• Leakage & Integrity Check"]
     end
 
     subgraph StorageTier["💾 Persistence & Storage Tier (SQLite WAL Mode)"]
@@ -56,13 +59,13 @@ graph TB
         NET_Web["Target Web Applications & Microservices"]
         NET_Subnet["Target Subnets & Network Ports"]
         NET_PCAP["Live Capture Feeds & Uploaded PCAPs"]
-        NET_Feeds["NVD & Vulners CVE Intelligence Feeds"]
+        Feed_CVE["NVD & Vulners CVE Intelligence Feeds"]
     end
 
     %% Apply Classes
-    class UI_Nav,UI_Zenmap,UI_Repeater,UI_Forensics,UI_Diff,UI_Reports client;
-    class GW_CORS,GW_WAF,GW_SSRF,GW_Limiter gateway;
-    class ENG_Nmap,ENG_SSL,ENG_Orch,ENG_Rep,ENG_Carve,ENG_Geo,ENG_Beacon,ENG_QUIC,ENG_CVSS,ENG_Diff engine;
+    class UI_Nav,UI_Zenmap,UI_Repeater,UI_Forensics,UI_Diff,UI_Reports,UI_Store client;
+    class GW_CORS,GW_WAF,GW_SSRF,GW_Path,GW_Limiter gateway;
+    class ENG_Nmap,ENG_SSL,ENG_Orch,ENG_Rep,ENG_Carve,ENG_Geo,ENG_Beacon,ENG_QUIC,ENG_CVSS,ENG_Diff,ENG_Val engine;
     class DB_Findings,DB_Artifacts,DB_Reports,DB_Events,DB_Alerts storage;
     class NET_Web,NET_Subnet,NET_PCAP,NET_Feeds external;
 
@@ -170,6 +173,7 @@ sequenceDiagram
 
     User->>UI: Uploads capture.pcap & optional sslkeys.log
     UI->>API: POST /api/pcap/upload
+    API->>API: Sanitizes filename with os.path.basename()
     API->>Analyzer: Ingests PCAP file to uploads/ directory
     
     par Parallel Extraction & Analysis
@@ -200,35 +204,48 @@ sequenceDiagram
 ```
 [ UNTRUSTED ZONE: User Browser / External Input ]
                       │
-                      ▼ (Strict Input Sanitization: ^[a-zA-Z0-9.\-_/:]+$)
-[ SECURITY GATEWAY: FastAPI WAF & SSRF Guard ]
+                      ▼ (Strict Input Sanitization & Base Path Normalization)
+[ SECURITY GATEWAY: FastAPI WAF, SSRF Guard & Path Sanitizer ]
                       │
                       ▼ (Zero-Shell Immutable Argument Array)
-[ ISOLATED EXECUTION: asyncio.create_subprocess_exec (No shell=True) ]
+[ ISOLATED EXECUTION: asyncio.create_subprocess_exec / execFile (No shell=True) ]
                       │
                       ▼ (Memory Bounded Stream Parsing: 512KB Capped Buffers)
-[ STORAGE & PERSISTENCE: SQLite WAL Mode with Safe Parameterized Queries ]
+[ STORAGE & PERSISTENCE: SQLite WAL Mode with Centralized DDL Lifecycle ]
 ```
 
 ### 1. Zero-Shell Execution Policy
-All backend subprocess invocations (Nmap, TShark, PyShark) construct immutable list structures:
-```python
-cmd = [nmap_path, "-oX", "-"] + validated_flags + [validated_target]
-process = await asyncio.create_subprocess_exec(*cmd, stdout=PIPE, stderr=PIPE)
-```
-Shell interpreters (`shell=True`, `sh -c`, `cmd.exe /c`) are strictly prohibited, neutralizing shell injection, pipe hijacking, and command chaining vectors.
+All backend subprocess invocations (Python and Node.js) enforce binary execution with immutable parameter lists:
+* **Python Backend** (`backend/nmap_engine.py`):
+  ```python
+  cmd = [nmap_path, "-oX", "-"] + validated_flags + [validated_target]
+  process = await asyncio.create_subprocess_exec(*cmd, stdout=PIPE, stderr=PIPE)
+  ```
+* **Node.js Express Backend** (`scanner-app/backend/trafficValidator.js`):
+  ```javascript
+  execFile('tshark', ['-r', capInfo.pcapPath, '-T', 'json', '-c', '100'], { maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => { ... });
+  ```
+Shell interpreters (`shell=True`, `sh -c`, `cmd.exe /c`, or raw `child_process.exec`) are prohibited across all components, preventing command chaining, shell metacharacter expansion, and argument injection attacks.
 
-### 2. SSRF Protection & RFC1918 Network Isolation
+### 2. Path Traversal & Upload Boundary Enforcement
+All incoming file upload and comparison endpoints strictly sanitize user-supplied filenames before writing to disk:
+```python
+safe_filename = os.path.basename(file.filename.replace('\\', '/'))
+target_path = os.path.join(UPLOAD_DIR, safe_filename)
+```
+This guarantees that traversal payloads (such as `../../etc/cron.d/malicious` or Windows backslash sequences `..\..\Windows\system32`) are stripped to their base name, confining all persistence operations to designated `uploads/` and `uploads/keys/` subdirectories.
+
+### 3. SSRF Protection & RFC1918 Network Isolation
 Pre-flight DNS and socket resolution parses every target URL against dangerous CIDR blocks:
 * `127.0.0.0/8` (Localhost loopback)
 * `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` (Private RFC1918 subnets)
 * `169.254.0.0/16` (Link-local autoconfiguration)
 * `169.254.169.254` (Cloud Metadata services for AWS/GCP/Azure/DigitalOcean)
 
-### 3. XML Entity & Billion Laughs Defense
+### 4. XML Entity & Billion Laughs Defense
 All external XML files ingested via `/api/nmap/import-xml` or Nmap stdout streams disable external DTDs and entity expansion, immunizing the server from XML External Entity (XXE) vulnerabilities and quadratic blowup attacks.
 
-### 4. Inert File Carving Storage
+### 5. Inert File Carving Storage
 All files carved from network streams (PE executables, ELF binaries, PDF scripts) are saved as inert binary blobs and served strictly with:
 ```http
 Content-Disposition: attachment; filename="<filename>"
@@ -239,9 +256,18 @@ This guarantees that downloaded forensic samples cannot execute within the clien
 
 ---
 
-## 4. 🗄️ Database Architecture & Data Dictionary
+## 4. 🗄️ Database Architecture & Data Lifecycle
 
-The platform utilizes a high-performance SQLite engine configured with **Write-Ahead Logging (WAL)** and in-memory temporary tables.
+The platform uses SQLite in **Write-Ahead Logging (WAL)** mode with high-throughput cache settings:
+```sql
+PRAGMA journal_mode = WAL;
+PRAGMA synchronous = NORMAL;
+PRAGMA cache_size = 10000;
+PRAGMA temp_store = MEMORY;
+```
+
+### Schema Lifecycle & DDL Isolation
+All table definitions and index allocations are consolidated inside `init_db()`. Individual mutation methods (`add_security_event`, `add_alert`, `record_finding`) execute pure parameterized DML (`INSERT`, `UPDATE`), eliminating runtime schema lock contention during high-volume telemetry ingestion.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
@@ -254,13 +280,42 @@ The platform utilizes a high-performance SQLite engine configured with **Write-A
 │ scan_reports      │ report_id [PK], target [IDX]     │ Executive assessments & CVSS    │
 │ security_events   │ id [PK], timestamp [IDX]         │ SIEM access & auth event logs   │
 │ alerts            │ id [PK], status [IDX]            │ Rule-triggered detection alerts │
+│ baselines         │ id [PK], metric_name [IDX]       │ Statistical metric baselines    │
+│ threat_intel_entries│ ip_address [IDX]               │ Correlated threat feed IOCs     │
+│ geo_cache         │ ip [PK]                          │ Cached IP geographic resolution │
 │ blocked_ips       │ ip_address [PK]                  │ WAF firewall dynamic blacklist  │
+│ signing_keys      │ kid [PK], status [IDX]           │ Active JWKS signing keys        │
 └───────────────────┴──────────────────────────────────┴─────────────────────────────────┘
 ```
 
 ---
 
-## 5. 🔌 API Specification & Route Reference
+## 5. 💻 Client State Management & Persistence Guard
+
+The frontend application uses **Zustand** for centralized state management with persistent browser storage. To ensure long-running packet captures and scans do not exceed the browser's 5MB `localStorage` limit, the store employs a strict state partitioning filter:
+
+```typescript
+export const useScanStore = create<ScanStore>()(
+  persist(
+    (set, get) => ({
+      // State & Actions
+    }),
+    { 
+      name: 'vulnscan-store',
+      partialize: (state) => Object.fromEntries(
+        Object.entries(state).filter(([key]) => !['livePackets', 'activeScanId'].includes(key))
+      ),
+    }
+  )
+);
+```
+
+* **Dropped Transient Keys**: High-frequency streaming packet buffers (`livePackets`) and ephemeral runtime handles (`activeScanId`) are kept in active memory but excluded from serialized storage.
+* **Persisted Data**: Scan configurations, target definitions, schedules, and normalized scan history are reliably retained across page refreshes.
+
+---
+
+## 6. 🔌 API Specification & Route Reference
 
 ### Web Zenmap Studio (`/api/nmap/*`)
 * `GET /api/nmap/profiles`: Returns structured scan profiles (`quick_scan`, `ping_sweep`, `intense_scan`, `nse_vuln_audit`).
@@ -281,12 +336,13 @@ The platform utilizes a high-performance SQLite engine configured with **Write-A
 * `POST /api/scan/diff`: Computes 4-way classification (`New`, `Resolved`, `Still-Open`, `Changed-Severity`).
 * `GET /api/scan/findings`: Retrieves indexed finding records.
 
-### Packet Forensics (`/api/pcap/*`)
+### Packet Forensics & Ingestion (`/api/pcap/*`)
+* `POST /api/pcap/upload`: Uploads and parses capture files (enforces `os.path.basename` sanitization).
+* `POST /api/pcap/upload-keylog`: Ingests `SSLKEYLOGFILE` for TLS/QUIC decryption (sanitized).
 * `GET /api/pcap/carved/{capture_id}`: Returns carved media and files.
 * `GET /api/pcap/carved/download/{filename}`: Downloads inert carved file.
 * `GET /api/pcap/geomap/{capture_id}`: Resolves batch-aggregated geographic threat flow arcs.
 * `GET /api/pcap/beaconing/{capture_id}`: Calculates C2 interval deltas and jitter percentages.
-* `POST /api/pcap/upload-keylog`: Ingests `SSLKEYLOGFILE` for TLS/QUIC decryption.
 
 ### Executive Reports & CVSS 3.1 (`/api/reports/*`, `/api/cvss/*`)
 * `POST /api/reports/generate`: Generates executive HTML/PDF assessment asynchronously.
