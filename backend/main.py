@@ -1272,13 +1272,97 @@ def list_scan_runs():
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT scan_id, target, MIN(first_seen) as timestamp, COUNT(*) as count,
+        SELECT scan_id, target, MIN(first_seen) as latest, COUNT(*) as finding_count,
                SUM(CASE WHEN severity = 'critical' THEN 1 ELSE 0 END) as critical_count,
                SUM(CASE WHEN severity = 'high' THEN 1 ELSE 0 END) as high_count
         FROM scan_findings
         GROUP BY scan_id, target
-        ORDER BY timestamp DESC
+        ORDER BY latest DESC
     """)
     rows = cursor.fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return {"runs": [dict(r) for r in rows]}
+
+
+@app.post("/api/scan/save-run")
+async def save_scan_run(request: Request):
+    """Persists a complete scan run (with findings) from the frontend into the SQLite database."""
+    data = await request.json()
+    scan_id = data.get("id", f"web_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}")
+    target = data.get("target", "unknown")
+    findings = data.get("findings", [])
+    now_str = datetime.utcnow().isoformat()
+    
+    conn = get_connection()
+    cursor = conn.cursor()
+    persisted = 0
+    
+    for f in findings:
+        title = f.get("title", "Untitled Finding")
+        severity = f.get("severity", "info")
+        description = f.get("description", "")
+        endpoint = f.get("endpoint", "/")
+        cwe = f.get("cwe", "")
+        cvss = float(f.get("cvss", 0.0))
+        remediation = f.get("remediation", "")
+        evidence = f.get("evidence", "")
+        
+        import hashlib
+        finding_hash = hashlib.sha256(
+            f"{target}:{title}:{endpoint}:{severity}".encode()
+        ).hexdigest()[:16]
+        
+        # Upsert: if same finding exists, update last_seen and increment count
+        cursor.execute(
+            "SELECT id, consecutive_count FROM scan_findings WHERE finding_hash = ? AND scan_id = ?",
+            (finding_hash, scan_id)
+        )
+        existing = cursor.fetchone()
+        
+        if existing:
+            cursor.execute(
+                "UPDATE scan_findings SET last_seen = ?, consecutive_count = ? WHERE id = ?",
+                (now_str, existing["consecutive_count"] + 1, existing["id"])
+            )
+        else:
+            cursor.execute("""
+                INSERT INTO scan_findings 
+                (scan_id, target, finding_hash, module_name, title, description, severity, 
+                 cvss_score, cwe, remediation, raw_evidence, status, first_seen, last_seen, consecutive_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, 1)
+            """, (
+                scan_id, target, finding_hash, "web_scanner", title, description,
+                severity, cvss, cwe, remediation, evidence, now_str, now_str
+            ))
+        persisted += 1
+    
+    conn.commit()
+    conn.close()
+    return {"success": True, "persisted": persisted, "scan_id": scan_id}
+
+
+@app.get("/api/scan/findings")
+def get_scan_findings(target: str = None, severity: str = None, scan_id: str = None):
+    """Retrieve stored scan findings with optional filters."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    query = "SELECT * FROM scan_findings WHERE 1=1"
+    params = []
+    
+    if target:
+        query += " AND target LIKE ?"
+        params.append(f"%{target}%")
+    if severity:
+        query += " AND severity = ?"
+        params.append(severity)
+    if scan_id:
+        query += " AND scan_id = ?"
+        params.append(scan_id)
+    
+    query += " ORDER BY last_seen DESC LIMIT 500"
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    conn.close()
+    return {"findings": [dict(r) for r in rows]}
+
