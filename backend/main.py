@@ -41,6 +41,7 @@ from pydantic import BaseModel
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 from backend.detection_rules import run_siem_rules
+from backend.devsecops.remediator import AIRemediator
 
 app = FastAPI(title="SentinelJWT Security Suite", version="1.0.0")
 
@@ -1587,5 +1588,43 @@ def get_exploit_audit_logs(target_id: Optional[int] = None, limit: int = 100):
     """Retrieves tamper-evident consent-gated exploit audit trails."""
     logs = database.get_exploit_audits(target_id=target_id, limit=limit)
     return {"audit_logs": logs}
+
+# --- 13. AI AUTO-REMEDIATION & 1-CLICK GITHUB PR ENDPOINTS ---
+
+class RemediateGenerateRequest(BaseModel):
+    finding: Dict[str, Any]
+
+class RemediatePRRequest(BaseModel):
+    repo_full_name: str
+    finding: Dict[str, Any]
+    github_token: Optional[str] = None
+
+@app.post("/api/remediate/generate")
+def generate_remediation_fix(payload: RemediateGenerateRequest):
+    """
+    Generates an AST-aware code patch, unified diff, attack vector walkthrough,
+    and Pull Request preview for a security finding.
+    """
+    try:
+        fix = AIRemediator.generate_fix(payload.finding)
+        return fix
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate remediation: {str(e)}")
+
+@app.post("/api/remediate/create-pr")
+def create_github_pull_request(payload: RemediatePRRequest):
+    """
+    Creates a patch branch and dispatches an automated Pull Request to GitHub.
+    """
+    try:
+        res = AIRemediator.create_github_pr(
+            repo_full_name=payload.repo_full_name,
+            finding=payload.finding,
+            github_token=payload.github_token
+        )
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to dispatch GitHub PR: {str(e)}")
+
 
 
