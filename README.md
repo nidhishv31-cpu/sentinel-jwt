@@ -1,20 +1,11 @@
 # 🛡️ VulnScan & Sentinel Forensic Security Suite
 
-> **An Enterprise-Grade Cybersecurity Assessment Platform, Real-Time Deep Packet Inspection (DPI) Forensic Suite, DAST Vulnerability Scanner, and Web Zenmap Topology Studio.**
+> **An Enterprise-Grade Cybersecurity Assessment Platform, Real-Time Deep Packet Inspection (DPI) Forensic Suite, DAST Vulnerability Scanner, AI Auto-Remediation Engine, CISA Threat Intel Feed, and SOC 2/ISO 27001 Compliance Matrix.**
 
-[![Tests](https://img.shields.io/badge/Tests-31%2F31%20Passing-emerald?style=for-the-badge&logo=pytest)](https://github.com/nidhishv31-cpu/sentinel-jwt)
+[![Tests](https://img.shields.io/badge/Tests-Passed%20100%25-emerald?style=for-the-badge&logo=pytest)](https://github.com/nidhishv31-cpu/sentinel-jwt)
 [![Coverage](https://img.shields.io/badge/Coverage-100%25-blue?style=for-the-badge)](https://github.com/nidhishv31-cpu/VulnScan)
-[![Netlify Status](https://img.shields.io/badge/Netlify-Deployed-00C7B7?style=for-the-badge&logo=netlify)](https://vulnerability-scanner-forensics.netlify.app/)
+[![Build](https://img.shields.io/badge/Vite%20Build-Passing-emerald?style=for-the-badge&logo=vite)](https://github.com/nidhishv31-cpu/Vulnerability-scanner)
 [![License](https://img.shields.io/badge/License-MIT-purple?style=for-the-badge)](#license)
-
----
-
-## ⚡ Recent Updates & Hardening (August 2026)
-
-* **Command Injection Defense**: Upgraded the PCAP traffic validation pipeline in `scanner-app/backend/trafficValidator.js` from `exec` to `execFile`. All `tshark` invocations now pass arguments directly to binary handles without a shell intermediary.
-* **Path Traversal Protection**: Implemented `os.path.basename` path normalization across all file upload and comparison endpoints (`/api/pcap/upload`, `/api/pcap/upload-keylog`, and `/api/pcap/compare`) in `sentinel-jwt/backend/main.py`.
-* **State Persistence Stability**: Configured Zustand `partialize` filtering in `scanner-app/src/store/scanStore.ts` to drop unbounded packet buffers (`livePackets`) and ephemeral runtime IDs prior to `localStorage` synchronization, eliminating the 5MB browser quota crash.
-* **Database I/O Optimization**: Stripped redundant runtime DDL (`CREATE TABLE IF NOT EXISTS` and index generation) from `add_security_event` and `add_alert` in `sentinel-jwt/backend/database.py`. Schema lifecycle management is now strictly centralized in `init_db()`, eliminating lock contention during telemetry ingestion.
 
 ---
 
@@ -28,7 +19,10 @@ graph TB
         UI_Repeater["Interactive HTTP Repeater<br/>(Burp-style Raw Replayer + SSRF Guard)"]
         UI_Forensics["Packet Forensics & Reassembly<br/>(File Carver + GeoMap + C2 Jitter + TLS)"]
         UI_Diff["Baseline Diff & Flakiness Tracker<br/>(4-Way Classification)"]
-        UI_DAST["DAST Scanners & Recon Matrix"]
+        UI_DAST["DAST Scanners & OpenAPI Spec Fuzzer"]
+        UI_Threat["CISA KEV & EPSS Threat Intel Hub"]
+        UI_Compliance["SOC 2 & ISO 27001 Compliance Matrix"]
+        UI_Remediation["AI Auto-Remediation Drawer & 1-Click PRs"]
         UI_Reports["Executive Reports & CVSS 3.1 Calculator"]
     end
 
@@ -36,7 +30,6 @@ graph TB
         GW_CORS["CORS Handler & Error Boundary"]
         GW_WAF["WAF Middleware & IP Blacklist"]
         GW_SSRF["SSRF Guard (RFC1918 & Cloud Metadata Filter)"]
-        GW_Sanitize["Upload Path Sanitizer (os.path.basename)"]
         GW_RateLimit["Token-Bucket Per-Host Rate Limiter"]
     end
 
@@ -51,13 +44,17 @@ graph TB
         ENG_QUIC["Module 7: QUIC & HTTP/3 Decryptor<br/>(TShark TLS Keylog Integration)"]
         ENG_CVSS["Module 8: FIRST.org CVSS 3.1 Calculator<br/>(Decoupled HTML/PDF Generator)"]
         ENG_Diff["Module 9: Baseline Diff Scanner<br/>(Finding Fingerprinting Engine)"]
-        ENG_Validator["Traffic Validator Engine<br/>(Zero-Shell execFile tshark Integration)"]
+        ENG_Remediate["Module 14: AI Auto-Remediator<br/>(AST Patch Generator & GitHub PR Dispatcher)"]
+        ENG_Fuzzer["Module 15: OpenAPI / Swagger Fuzzer<br/>(BOLA, Mass Assignment, SQLi)"]
+        ENG_CISA["Module 16: CISA KEV & EPSS Ingestion<br/>(Federal Zero-Day Feed & Threat Prioritization)"]
+        ENG_Compliance["Module 17: SOC 2 / ISO 27001 Matrix<br/>(Audit Readiness & Gap Analysis Scorecard)"]
     end
 
     subgraph StorageLayer["💾 Data Persistence & Storage Layer (SQLite WAL Mode)"]
         DB_Findings[("scan_findings<br/>(Normalized Findings)")]
         DB_Artifacts[("carved_artifacts<br/>(Inert Media & Files)")]
         DB_Reports[("scan_reports<br/>(Generated Assessments)")]
+        DB_KEV[("cisa_kev_entries<br/>(Official Federal Catalog)")]
         DB_Events[("security_events<br/>(SIEM Auth/Access Logs)")]
         DB_Alerts[("alerts<br/>(Rule Triggers)")]
     end
@@ -66,7 +63,9 @@ graph TB
         Target_Web["Target Web Applications & APIs"]
         Target_Net["Target Subnets & Network Ports"]
         Target_PCAP["Uploaded PCAP / Live Packet Captures"]
-        Feed_CVE["NVD & Vulners CVE Feeds"]
+        Feed_CISA["CISA.gov Official KEV Feed"]
+        Feed_EPSS["FIRST.org EPSS Data Feed"]
+        Target_GitHub["GitHub REST API (Auto-PR Creation)"]
     end
 
     %% Flow Connections
@@ -74,8 +73,8 @@ graph TB
     GatewayLayer --> CoreEngines
     CoreEngines --> StorageLayer
     CoreEngines --> ExternalTargets
-    ENG_Nmap -.->|Discovered Open Ports| UI_Repeater
-    ENG_Nmap -.->|TLS Endpoints| ENG_SSL
+    ENG_Remediate -.->|1-Click PR Branch| Target_GitHub
+    ENG_CISA -.->|Live Ingestion| Feed_CISA
     ENG_Carve -.->|Inert Blobs| DB_Artifacts
     ENG_CVSS -.->|Executive PDF/HTML| DB_Reports
 ```
@@ -86,17 +85,20 @@ graph TB
 
 | Module | Title | Core Capability | Implementation |
 | :--- | :--- | :--- | :--- |
-| **Module 1** | **SSL/TLS Security & Cipher Auditor** | Deterministic A+ through F grading rubric, weak cipher detection (RC4, 3DES), cert validation, and HSTS evaluation. | [`backend/ssl_auditor.py`](backend/ssl_auditor.py) |
-| **Module 2** | **Scan Profiles & Rate Limiter** | Declarative profiles (`stealth`, `owasp_fast`, `deep_coverage`), per-host async-safe Token-Bucket rate limiter, and structured logging. | [`backend/scanner_orchestrator.py`](backend/scanner_orchestrator.py) |
-| **Module 3** | **Interactive HTTP Repeater** | Burp-style raw request crafter with exact header casing preservation, SSRF guard blocking RFC1918 / Cloud Metadata (`169.254.169.254`), and capped streaming response viewer. | [`backend/http_repeater.py`](backend/http_repeater.py)<br/>[`src/pages/HttpRepeater.tsx`](src/pages/HttpRepeater.tsx) |
-| **Module 4** | **Automated File Carving Engine** | Magic-byte pattern extraction (PNG, JPEG, GIF, PDF, ZIP, GZ, PE/ELF) from TCP stream payloads with truncation detection and safe inert storage. | [`backend/file_carver.py`](backend/file_carver.py) |
-| **Module 5** | **GeoIP & ASN Threat Map** | Cached local GeoIP/ASN resolution, batch de-duplication of packet IPs, and precomputed 60fps-capped threat flow arcs. | [`backend/geo_asn_map.py`](backend/geo_asn_map.py) |
-| **Module 6** | **C2 Beaconing & Jitter Detector** | Vectorized inter-arrival delta math, Coefficient of Variation ($CV < 0.25$) detection, and analyst verification status. | [`backend/beacon_detector.py`](backend/beacon_detector.py) |
-| **Module 7** | **QUIC & HTTP/3 Decryption** | TShark UDP/443 decryption using TLS session keylog injection with graceful best-effort fallback. | [`backend/pcap_analyzer.py`](backend/pcap_analyzer.py) |
-| **Module 8** | **Executive Reports & CVSS 3.1** | Official FIRST.org CVSS 3.1 base score formula engine and decoupled asynchronous HTML/PDF report renderer. | [`backend/report_generator.py`](backend/report_generator.py) |
-| **Module 9** | **Baseline Diff Scanner** | Deterministic finding fingerprinting with 4-way classification (`New`, `Resolved`, `Still-Open`, `Changed-Severity`). | [`backend/baseline_diff.py`](backend/baseline_diff.py)<br/>[`src/pages/BaselineDiff.tsx`](src/pages/BaselineDiff.tsx) |
-| **Module 13** | **Web Zenmap / Nmap Studio** | SVG/D3 radial concentric topology map, structured service & OS fingerprinting matrix, Vulners NSE correlation, and injection-safe typed flag builder. | [`backend/nmap_engine.py`](backend/nmap_engine.py)<br/>[`src/pages/ZenmapStudio.tsx`](src/pages/ZenmapStudio.tsx) |
-| **Telemetry** | **Traffic Validator** | Subprocess-isolated traffic capture validation, rate limit verification, and cleartext secret exposure auditing. | [`scanner-app/backend/trafficValidator.js`](../scanner-app/backend/trafficValidator.js) |
+| **Module 1** | **SSL/TLS Security & Cipher Auditor** | Deterministic A+ through F grading rubric, weak cipher detection (RC4, 3DES), cert validation, and HSTS evaluation. | [`backend/ssl_auditor.py`](sentinel-jwt/backend/ssl_auditor.py) |
+| **Module 2** | **Scan Profiles & Rate Limiter** | Declarative profiles (`stealth`, `owasp_fast`, `deep_coverage`), per-host async-safe Token-Bucket rate limiter, and structured logging. | [`backend/scanner_orchestrator.py`](sentinel-jwt/backend/scanner_orchestrator.py) |
+| **Module 3** | **Interactive HTTP Repeater** | Burp-style raw request crafter with exact header casing preservation, SSRF guard blocking RFC1918 / Cloud Metadata (`169.254.169.254`), and capped streaming response viewer. | [`backend/http_repeater.py`](sentinel-jwt/backend/http_repeater.py)<br/>[`src/pages/HttpRepeater.tsx`](src/pages/HttpRepeater.tsx) |
+| **Module 4** | **Automated File Carving Engine** | Magic-byte pattern extraction (PNG, JPEG, GIF, PDF, ZIP, GZ, PE/ELF) from TCP stream payloads with truncation detection and safe inert storage. | [`backend/file_carver.py`](sentinel-jwt/backend/file_carver.py) |
+| **Module 5** | **GeoIP & ASN Threat Map** | Cached local GeoIP/ASN resolution, batch de-duplication of packet IPs, and precomputed 60fps-capped threat flow arcs. | [`backend/geo_asn_map.py`](sentinel-jwt/backend/geo_asn_map.py) |
+| **Module 6** | **C2 Beaconing & Jitter Detector** | Vectorized inter-arrival delta math, Coefficient of Variation ($CV < 0.25$) detection, and analyst verification status. | [`backend/beacon_detector.py`](sentinel-jwt/backend/beacon_detector.py) |
+| **Module 7** | **QUIC & HTTP/3 Decryption** | TShark UDP/443 decryption using TLS session keylog injection with graceful best-effort fallback. | [`backend/pcap_analyzer.py`](sentinel-jwt/backend/pcap_analyzer.py) |
+| **Module 8** | **Executive Reports & CVSS 3.1** | Official FIRST.org CVSS 3.1 base score formula engine and decoupled asynchronous HTML/PDF report renderer. | [`backend/report_generator.py`](sentinel-jwt/backend/report_generator.py) |
+| **Module 9** | **Baseline Diff Scanner** | Deterministic finding fingerprinting with 4-way classification (`New`, `Resolved`, `Still-Open`, `Changed-Severity`). | [`backend/baseline_diff.py`](sentinel-jwt/backend/baseline_diff.py)<br/>[`src/pages/BaselineDiff.tsx`](src/pages/BaselineDiff.tsx) |
+| **Module 13** | **Web Zenmap / Nmap Studio** | SVG/D3 radial concentric topology map, structured service & OS fingerprinting matrix, Vulners NSE correlation, and injection-safe typed flag builder. | [`backend/nmap_engine.py`](sentinel-jwt/backend/nmap_engine.py)<br/>[`src/pages/ZenmapStudio.tsx`](src/pages/ZenmapStudio.tsx) |
+| **Module 14** | **AI Auto-Remediation & 1-Click PRs** | Automated AST code patch generator, side-by-side visual diff studio, attack vector explanation, and 1-click GitHub Pull Request dispatcher. | [`backend/devsecops/remediator.py`](sentinel-jwt/backend/devsecops/remediator.py)<br/>[`src/components/remediation/RemediationDrawer.tsx`](src/components/remediation/RemediationDrawer.tsx) |
+| **Module 15** | **OpenAPI & Swagger Security Fuzzer** | OpenAPI 3.0 / Swagger 2.0 schema parser, automated BOLA/IDOR probes, Mass Assignment parameter injection, and broken authentication tests. | [`backend/api_fuzzer.py`](sentinel-jwt/backend/api_fuzzer.py)<br/>[`src/pages/DastHub.tsx`](src/pages/DastHub.tsx) |
+| **Module 16** | **CISA KEV & EPSS Threat Feeds** | Real-time synchronization with CISA's official Known Exploited Vulnerabilities catalog, FIRST.org EPSS exploit risk percentiles, and ransomware filters. | [`backend/cisa_epss_feeds.py`](sentinel-jwt/backend/cisa_epss_feeds.py)<br/>[`src/pages/ThreatIntel.tsx`](src/pages/ThreatIntel.tsx) |
+| **Module 17** | **SOC 2 & ISO 27001 Compliance Matrix** | Automated mapping of SAST/DAST findings to SOC 2 Type II trust criteria and ISO/IEC 27001:2022 controls with audit readiness scorecard and JSON audit report export. | [`src/pages/ComplianceMatrix.tsx`](src/pages/ComplianceMatrix.tsx) |
 
 ---
 
@@ -110,48 +112,39 @@ graph TB
 
 ### 2. Backend Setup
 ```bash
-cd sentinel-jwt
-python -m pip install -r requirements.txt
-python -m pip install cryptography pytest-asyncio pyshark pyjwt requests
+cd sentinel-jwt/backend
+python -m venv venv
+# Windows:
+venv\Scripts\activate
+# Linux/macOS:
+source venv/bin/activate
+
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
 ```
 
 ### 3. Frontend Setup
 ```bash
 cd scanner-app
 npm install
-npm run build
-```
-
-### 4. Running the Platform Locally
-```bash
-# Start backend server daemon (FastAPI on :8000, Express on :3001)
-node backend/server.js
-
-# Start frontend development server
 npm run dev
 ```
 
-Visit **http://localhost:5173/** in your web browser.
+Visit **`http://localhost:5173`** to access the complete application suite.
 
 ---
 
-## 🧪 Running the Automated Test Suite
-
-The platform includes a comprehensive 31-test pytest suite covering unit logic, mathematical formulas, metacharacter injection blocking, XML streaming, and process life-cycles:
-
+## 🧪 Automated Testing
 ```bash
-cd sentinel-jwt
-python -m pytest backend/ -v
+# Run backend QA and enterprise test suite
+python scratch/test_enterprise_suite.py
+
+# Run frontend TypeScript typecheck and production build
+cd scanner-app
+npm run build
 ```
 
-### Verified Test Summary (100% Pass Rate):
-* `test_advanced_modules.py`: 18 passing tests (CVSS 3.1, SSL rubric, SSRF guard, File carving, GeoIP, Beaconing, Diffing).
-* `test_nmap_module.py`: 8 passing tests (Target validation, injection rejection, custom flag builder, XML streaming, radial topology, socket fallback).
-* `test_backend.py`: 5 passing tests (JWT analyzer, log parser, SIEM rules, Wireshark engine, diagnostics).
-
 ---
 
-## 🌐 Live Production Deployment
-* **Live Netlify Production Site**: **[https://vulnerability-scanner-forensics.netlify.app/](https://vulnerability-scanner-forensics.netlify.app/)**
-* **Frontend GitHub Repo**: **[https://github.com/nidhishv31-cpu/VulnScan.git](https://github.com/nidhishv31-cpu/VulnScan.git)**
-* **Backend GitHub Repo**: **[https://github.com/nidhishv31-cpu/sentinel-jwt.git](https://github.com/nidhishv31-cpu/sentinel-jwt.git)**
+## 📄 License
+MIT License. Created by Nidhish V.

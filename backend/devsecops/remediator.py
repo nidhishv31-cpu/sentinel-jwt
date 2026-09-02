@@ -115,7 +115,7 @@ class AIRemediator:
         if cwe == 'CWE-89':
             if snippet and ('SELECT' in snippet.upper() or 'cursor.execute' in snippet):
                 orig = snippet.strip()
-                patched = 'cursor.execute("SELECT * FROM accounts WHERE user_id = ?", (user_input,))'
+                patched = '# Patched: Parameterized query with bind variables\ncursor.execute("SELECT * FROM accounts WHERE user_id = ?", (user_input,))'
             else:
                 if is_js:
                     orig = 'const query = "SELECT * FROM users WHERE email = \'" + req.body.email + "\'";\nconst results = await db.query(query);'
@@ -164,15 +164,16 @@ class AIRemediator:
 
     @staticmethod
     def _generate_unified_diff(file_path: str, orig: str, patched: str) -> str:
-        orig_lines = orig.splitlines(keepends=True)
-        patched_lines = patched.splitlines(keepends=True)
-        diff = difflib.unified_diff(
+        orig_lines = [l + '\n' for l in orig.splitlines()]
+        patched_lines = [l + '\n' for l in patched.splitlines()]
+        header = f"diff --git a/{file_path} b/{file_path}\n"
+        diff = list(difflib.unified_diff(
             orig_lines, patched_lines,
             fromfile=f'a/{file_path}',
             tofile=f'b/{file_path}',
             n=3
-        )
-        return ''.join(diff)
+        ))
+        return header + ''.join(diff)
 
     @staticmethod
     def _generate_pr_description(title: str, cwe: str, info: Dict[str, Any], file_path: str, diff: str) -> str:

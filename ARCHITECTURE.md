@@ -1,351 +1,81 @@
-# 🏛️ Comprehensive Technical Architecture & Engineering Specification
+# 🏛️ Sentinel Forensic & Vulnerability Scanner Architecture
 
-> **VulnScan & Sentinel Forensic Security Suite** — A Unified Deep Packet Inspection (DPI) Forensic Engine, Automated Dynamic Application Security Testing (DAST) Platform, and Web-Based Zenmap Topology Studio.
+## 1. System Overview
+Sentinel is an enterprise-grade DevSecOps, Dynamic Application Security Testing (DAST), Network Forensics, and Threat Intelligence platform designed to provide automated security scanning, AI-driven code remediation, and compliance governance.
 
 ---
 
-## 1. 🌐 System Architectural Block Diagram
+## 2. Architecture Layers
 
 ```mermaid
-graph TB
-    %% Styling
-    classDef client fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#fff;
-    classDef gateway fill:#1e1b4b,stroke:#818cf8,stroke-width:2px,color:#fff;
-    classDef engine fill:#14532d,stroke:#4ade80,stroke-width:2px,color:#fff;
-    classDef storage fill:#3b0764,stroke:#c084fc,stroke-width:2px,color:#fff;
-    classDef external fill:#451a03,stroke:#fb923c,stroke-width:2px,color:#fff;
-
-    subgraph ClientTier["🖥️ Client Presentation Layer (React 19 + TypeScript + Vite)"]
-        UI_Nav["TopBar & Shell Layout Manager"]
-        UI_Zenmap["Web Zenmap Topology Studio<br/>• SVG/D3 Concentric Radial Graph<br/>• Service & OS Fingerprint Matrix<br/>• NSE Vulnerability Correlation<br/>• Typed Flag Custom Builder"]
-        UI_Repeater["Interactive HTTP Repeater<br/>• Raw Byte/Header Crafter<br/>• SSRF Guard Warning Modal<br/>• Latency & Size Metrics<br/>• Pretty/Raw/Headers Inspector"]
-        UI_Forensics["Packet Forensics Suite<br/>• TShark Stream Reassembler<br/>• TLS/QUIC Decryption Studio<br/>• Foremost Magic-Byte Carver<br/>• GeoIP & ASN Threat Map<br/>• C2 Jitter Beaconing Detector"]
-        UI_Diff["Baseline Diff Scanner<br/>• 4-Way Category Tracker<br/>• Flakiness Window Classifier"]
-        UI_Reports["Executive Reports & CVSS 3.1<br/>• Official FIRST.org Calculator<br/>• Async HTML/PDF Generator"]
-        UI_Store["Zustand Persistence Manager<br/>• partialize Schema Filter<br/>• Quota-Safe LocalStorage Guard"]
+graph TD
+    subgraph UI ["Frontend User Experience (React 19, Vite, Tailwind CSS)"]
+        Dashboard["Overview & Findings Triage"]
+        DAST_Hub["DAST Scanners & OpenAPI Fuzzer"]
+        Zenmap["Zenmap Radial Topology Studio"]
+        Forensics["Deep Packet Inspection & Forensics"]
+        ThreatHub["CISA KEV & EPSS Threat Intel"]
+        Compliance["SOC 2 & ISO 27001 Compliance Matrix"]
+        Remediation["AI Auto-Remediation Studio"]
     end
 
-    subgraph GatewayTier["🚪 API Gateway & Security Boundary (FastAPI :8000 & Express :3001)"]
-        GW_CORS["CORS Middleware (Allowed Origins & Methods)"]
-        GW_WAF["WAF Middleware (SQLite Blocked IP Store)"]
-        GW_SSRF["SSRF Guard (RFC1918 & Cloud Metadata Filter)"]
-        GW_Path["Path Traversal Guard (os.path.basename Normalization)"]
-        GW_Limiter["TokenBucket Rate Limiter (Per-Host Asynchronous Limiting)"]
+    subgraph API ["Gateway & Security Proxy Layer"]
+        Express["Express API Gateway (Port 3001)"]
+        FastAPI["FastAPI Python Core (Port 8000)"]
     end
 
-    subgraph EngineTier["⚙️ Core Processing & Security Assessment Engines"]
-        ENG_Nmap["Module 13: Zenmap / Nmap Engine<br/>• asyncio.create_subprocess_exec<br/>• Streaming XML iterparse<br/>• Fallback Socket Connect-Scanner"]
-        ENG_SSL["Module 1: SSL/TLS Auditor<br/>• Cryptography X.509 Probes<br/>• A+ to F Grading Rubric<br/>• HSTS & Weak Cipher Matrix"]
-        ENG_Orch["Module 2: Scanner Orchestrator<br/>• Stealth, Fast & Deep Profiles<br/>• Diagnostic Trace Logger"]
-        ENG_Rep["Module 3: Raw HTTP Replayer<br/>• Low-Level Socket Pipeline<br/>• 512KB Stream Cap"]
-        ENG_Carve["Module 4: Magic-Byte Carver<br/>• Foremost/Scalpel Headers<br/>• Truncation Detector<br/>• Inert Octet-Stream Storage"]
-        ENG_Geo["Module 5: GeoIP & ASN Resolver<br/>• Local Resolution Cache<br/>• Precomputed Spatial Arcs"]
-        ENG_Beacon["Module 6: C2 Beaconing Detector<br/>• Inter-Arrival Time Deltas<br/>• Coefficient of Variation (CV)"]
-        ENG_QUIC["Module 7: QUIC/HTTP3 Decryptor<br/>• TShark Keylog Hook"]
-        ENG_CVSS["Module 8: CVSS 3.1 Calculator<br/>• FIRST.org Vector Engine"]
-        ENG_Diff["Module 9: Baseline Diff Engine<br/>• Stable Finding Fingerprinter"]
-        ENG_Val["Traffic Validator Engine<br/>• Zero-Shell execFile Parser<br/>• Leakage & Integrity Check"]
+    subgraph Engines ["Core Analytical Engines"]
+        AST_Engine["AST AI Code Remediator"]
+        Fuzz_Engine["OpenAPI Schema & IDOR Fuzzer"]
+        CISA_Engine["CISA KEV & EPSS Synchronizer"]
+        Nmap_Engine["Nmap & Zenmap Engine"]
+        PCAP_Engine["TShark Deep Packet Inspector"]
+        SSL_Engine["SSL/TLS Cipher Auditor"]
     end
 
-    subgraph StorageTier["💾 Persistence & Storage Tier (SQLite WAL Mode)"]
-        DB_Findings[("scan_findings<br/>• finding_hash [PK]<br/>• scan_id, target, module<br/>• severity, cvss_score, cwe<br/>• consecutive_count")]
-        DB_Artifacts[("carved_artifacts<br/>• artifact_id [PK]<br/>• file_type, mime_type<br/>• file_size, md5_hash<br/>• is_truncated")]
-        DB_Reports[("scan_reports<br/>• report_id [PK]<br/>• target, health_index<br/>• file_path, format")]
-        DB_Events[("security_events<br/>• event_id, timestamp<br/>• source_ip, details")]
-        DB_Alerts[("alerts<br/>• alert_id, rule_triggered<br/>• severity, status")]
+    subgraph Persistence ["Persistence Layer"]
+        SQLite[("SQLite WAL Database (sentinel.db)")]
     end
 
-    subgraph TargetTier["🌐 Target Infrastructure & Intelligence Networks"]
-        NET_Web["Target Web Applications & Microservices"]
-        NET_Subnet["Target Subnets & Network Ports"]
-        NET_PCAP["Live Capture Feeds & Uploaded PCAPs"]
-        Feed_CVE["NVD & Vulners CVE Intelligence Feeds"]
-    end
-
-    %% Apply Classes
-    class UI_Nav,UI_Zenmap,UI_Repeater,UI_Forensics,UI_Diff,UI_Reports,UI_Store client;
-    class GW_CORS,GW_WAF,GW_SSRF,GW_Path,GW_Limiter gateway;
-    class ENG_Nmap,ENG_SSL,ENG_Orch,ENG_Rep,ENG_Carve,ENG_Geo,ENG_Beacon,ENG_QUIC,ENG_CVSS,ENG_Diff,ENG_Val engine;
-    class DB_Findings,DB_Artifacts,DB_Reports,DB_Events,DB_Alerts storage;
-    class NET_Web,NET_Subnet,NET_PCAP,NET_Feeds external;
-
-    %% Linkages
-    ClientTier -->|REST API / JSON & WebSockets| GatewayTier
-    GatewayTier --> EngineTier
-    EngineTier --> StorageTier
-    EngineTier --> TargetTier
-
-    %% Cross-Module Interactivity
-    ENG_Nmap -.->|Discovered Open Ports| UI_Repeater
-    ENG_Nmap -.->|Discovered TLS Endpoints| ENG_SSL
-    ENG_Carve -.->|Extracted Blobs| DB_Artifacts
-    ENG_CVSS -.->|Executive Assessments| DB_Reports
+    UI --> Express
+    Express --> FastAPI
+    FastAPI --> Engines
+    Engines --> SQLite
 ```
 
 ---
 
-## 2. 🔄 End-to-End Sequence & Execution Workflows
+## 3. Core Enterprise Engines
 
-### A. Web Zenmap & Nmap Asynchronous Discovery Workflow (Module 13)
+### A. AI Auto-Remediation Engine (`devsecops/remediator.py`)
+- **AST Pattern Synthesis**: Synthesizes secure code replacements for SQL Injection (CWE-89), XSS (CWE-79), Path Traversal (CWE-22), Hardcoded Secrets (CWE-798), and Missing Headers (CWE-693).
+- **Git Unified Diffing**: Generates standard `diff --git` patches with line-by-line before/after code comparisons.
+- **1-Click Pull Request Dispatcher**: Dispatches pull requests directly to GitHub via the GitHub REST API (`POST /repos/{owner}/{repo}/pulls`).
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor User as Security Analyst
-    participant UI as ZenmapStudio (Frontend)
-    participant API as FastAPI Gateway
-    participant Engine as NmapEngine
-    participant Subproc as nmap.exe Subprocess
-    participant Target as Target Network
+### B. OpenAPI & Swagger Security Fuzzer (`api_fuzzer.py`)
+- **Specification Ingestion**: Parses OpenAPI 3.0.x and Swagger 2.0 specs from remote URLs or raw JSON schemas.
+- **Fuzzing Modules**:
+  - **BOLA / IDOR**: Probes object identifiers (`{userId}`, `{id}`) across authorization boundaries.
+  - **Mass Assignment**: Injects administrative and privilege-escalation fields (`isAdmin`, `role: "admin"`).
+  - **SQLi Parameter Tampering**: Injects SQL test payloads into URL query parameters.
+  - **Unauthenticated Route Disclosure**: Flags sensitive endpoints lacking required security definitions.
 
-    User->>UI: Selects Target & Flags (e.g. -T4, -sV, -O, --traceroute)
-    UI->>API: POST /api/nmap/scan (target, profile, custom_params)
-    API->>Engine: validate_scan_target() & validate_and_build_custom_flags()
-    Engine-->>API: Returns scan_id (e.g. nmap_3019dc4b)
-    API-->>UI: 200 OK (scan_id, status: "initializing")
-    
-    par Background Streaming Execution
-        Engine->>Subproc: asyncio.create_subprocess_exec("nmap", "-oX", "-", ...)
-        Subproc->>Target: Transmits TCP SYN / Connect / Version Probes
-        Target-->>Subproc: Returns SYN-ACK, Banners, ICMP Hops
-        
-        loop Incremental XML Streaming
-            Subproc-->>Engine: Streams XML chunks via stdout
-            Engine->>Engine: parse_nmap_xml_string() extracts <host>, <port>, <trace>
-            UI->>API: GET /api/nmap/status/{scan_id} (Polling every 1.5s)
-            API-->>UI: Returns newly discovered hosts & incremental progress %
-        end
-    end
+### C. CISA KEV & EPSS Threat Feeds (`cisa_epss_feeds.py`)
+- **Catalog Ingestion**: Synchronizes with the official CISA Known Exploited Vulnerabilities catalog.
+- **EPSS Scoring**: Calculates FIRST.org Exploit Prediction Scoring System probability percentiles.
+- **Ransomware Intelligence**: Flags CVEs actively weaponized in known ransomware campaigns.
 
-    Subproc-->>Engine: Process terminates (returncode: 0)
-    Engine->>Engine: compute_radial_topology_coordinates() (O(N) Geometry)
-    UI->>API: GET /api/nmap/topology/{scan_id}
-    API-->>UI: Returns concentric radial node coordinates & link arrays
-    UI->>UI: Renders SVG/D3 Radial Concentric Rings & Service Matrix
-```
+### D. SOC 2 & ISO 27001 Compliance Matrix (`ComplianceMatrix.tsx`)
+- **Standard Mapping**:
+  - **SOC 2 Type II**: CC6.1 (Logical Access), CC6.6 (Vulnerability Management), CC6.7 (Data Transmission Security), CC7.1 (Continuous Threat Monitoring), CC7.2 (Incident Remediation).
+  - **ISO/IEC 27001:2022**: A.8.8 (Technical Vulnerabilities), A.8.20 (Network Security), A.8.24 (Cryptography & Secrets), A.5.15 (Access Control).
+- **Automated Scorecard**: Generates real-time compliance readiness percentage scores and gap analysis.
+- **1-Click Audit Export**: Exports compliance audit data in standard JSON format.
 
 ---
 
-### B. Interactive HTTP Repeater with SSRF Protection Workflow (Module 3)
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor User as Security Analyst
-    participant UI as HttpRepeater (Frontend)
-    participant API as FastAPI Gateway
-    participant Repeater as HttpRepeater Engine
-    participant Target as Target Server / API
-
-    User->>UI: Crafts Raw Method, URL, Custom Headers, and Body
-    User->>UI: Clicks "Send Request"
-    UI->>API: POST /api/repeater/send
-    API->>Repeater: check_ssrf_risk(url)
-    
-    alt Target resolves to RFC1918 / 127.0.0.1 / 169.254.169.254 without override
-        Repeater-->>API: status: "blocked_ssrf" (SSRF Guard Triggered)
-        API-->>UI: 200 OK (Blocked with IP Warning)
-        UI->>User: Displays SSRF Warning Modal (Requires explicit confirmation)
-    else Target is Public OR Override Confirmed
-        Repeater->>Target: Dispatches Raw HTTP Request (Preserving exact casing)
-        Target-->>Repeater: Returns HTTP Response Stream
-        Repeater->>Repeater: Captures duration_ms, caps stream at 512KB
-        Repeater-->>API: Returns { status: 200, headers, body, duration_ms }
-        API-->>UI: 200 OK (Structured Response Object)
-        UI->>UI: Updates Status Badge, Pretty/Raw/Headers Viewports, and History
-    end
-```
-
----
-
-### C. Packet Forensics, File Carving & TLS Decryption Pipeline (Modules 4, 5, 6, 7)
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor User as Forensic Analyst
-    participant UI as TraceForensics (Frontend)
-    participant API as FastAPI Gateway
-    participant Analyzer as PCAP Analyzer
-    participant Carver as FileCarver Engine
-    participant Geo as GeoIP / ASN Engine
-    participant Beacon as BeaconDetector Engine
-
-    User->>UI: Uploads capture.pcap & optional sslkeys.log
-    UI->>API: POST /api/pcap/upload
-    API->>API: Sanitizes filename with os.path.basename()
-    API->>Analyzer: Ingests PCAP file to uploads/ directory
-    
-    par Parallel Extraction & Analysis
-        API->>Analyzer: follow_tcp_stream(injecting tls.keylog_file)
-        Analyzer-->>Carver: Feeds cleartext TCP stream payload bytes
-        Carver->>Carver: Foremost magic-byte scanning (PNG, JPG, PDF, ZIP, ELF, PE)
-        Carver->>Carver: Flags truncated streams & saves inert blobs
-        
-        API->>Geo: batch_aggregate_pcap_geo(flows)
-        Geo->>Geo: De-duplicates unique IPs, resolves City/ASN, generates flow arcs
-        
-        API->>Beacon: analyze_traffic_beaconing(packet_timestamps)
-        Beacon->>Beacon: Computes delta intervals Δt and Coefficient of Variation (CV)
-    end
-
-    UI->>API: GET /api/pcap/carved/{capture_id}
-    API-->>UI: Returns Carved Media Gallery
-    UI->>API: GET /api/pcap/geomap/{capture_id}
-    API-->>UI: Returns World Threat Flow Arcs & Country Breakdown
-    UI->>API: GET /api/pcap/beaconing/{capture_id}
-    API-->>UI: Returns Periodic C2 Heartbeat Indicators
-```
-
----
-
-## 3. 🛡️ Security Architecture & Trust Boundaries
-
-```
-[ UNTRUSTED ZONE: User Browser / External Input ]
-                      │
-                      ▼ (Strict Input Sanitization & Base Path Normalization)
-[ SECURITY GATEWAY: FastAPI WAF, SSRF Guard & Path Sanitizer ]
-                      │
-                      ▼ (Zero-Shell Immutable Argument Array)
-[ ISOLATED EXECUTION: asyncio.create_subprocess_exec / execFile (No shell=True) ]
-                      │
-                      ▼ (Memory Bounded Stream Parsing: 512KB Capped Buffers)
-[ STORAGE & PERSISTENCE: SQLite WAL Mode with Centralized DDL Lifecycle ]
-```
-
-### 1. Zero-Shell Execution Policy
-All backend subprocess invocations (Python and Node.js) enforce binary execution with immutable parameter lists:
-* **Python Backend** (`backend/nmap_engine.py`):
-  ```python
-  cmd = [nmap_path, "-oX", "-"] + validated_flags + [validated_target]
-  process = await asyncio.create_subprocess_exec(*cmd, stdout=PIPE, stderr=PIPE)
-  ```
-* **Node.js Express Backend** (`scanner-app/backend/trafficValidator.js`):
-  ```javascript
-  execFile('tshark', ['-r', capInfo.pcapPath, '-T', 'json', '-c', '100'], { maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => { ... });
-  ```
-Shell interpreters (`shell=True`, `sh -c`, `cmd.exe /c`, or raw `child_process.exec`) are prohibited across all components, preventing command chaining, shell metacharacter expansion, and argument injection attacks.
-
-### 2. Path Traversal & Upload Boundary Enforcement
-All incoming file upload and comparison endpoints strictly sanitize user-supplied filenames before writing to disk:
-```python
-safe_filename = os.path.basename(file.filename.replace('\\', '/'))
-target_path = os.path.join(UPLOAD_DIR, safe_filename)
-```
-This guarantees that traversal payloads (such as `../../etc/cron.d/malicious` or Windows backslash sequences `..\..\Windows\system32`) are stripped to their base name, confining all persistence operations to designated `uploads/` and `uploads/keys/` subdirectories.
-
-### 3. SSRF Protection & RFC1918 Network Isolation
-Pre-flight DNS and socket resolution parses every target URL against dangerous CIDR blocks:
-* `127.0.0.0/8` (Localhost loopback)
-* `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` (Private RFC1918 subnets)
-* `169.254.0.0/16` (Link-local autoconfiguration)
-* `169.254.169.254` (Cloud Metadata services for AWS/GCP/Azure/DigitalOcean)
-
-### 4. XML Entity & Billion Laughs Defense
-All external XML files ingested via `/api/nmap/import-xml` or Nmap stdout streams disable external DTDs and entity expansion, immunizing the server from XML External Entity (XXE) vulnerabilities and quadratic blowup attacks.
-
-### 5. Inert File Carving Storage
-All files carved from network streams (PE executables, ELF binaries, PDF scripts) are saved as inert binary blobs and served strictly with:
-```http
-Content-Disposition: attachment; filename="<filename>"
-Content-Type: application/octet-stream
-X-Content-Type-Options: nosniff
-```
-This guarantees that downloaded forensic samples cannot execute within the client browser context.
-
----
-
-## 4. 🗄️ Database Architecture & Data Lifecycle
-
-The platform uses SQLite in **Write-Ahead Logging (WAL)** mode with high-throughput cache settings:
-```sql
-PRAGMA journal_mode = WAL;
-PRAGMA synchronous = NORMAL;
-PRAGMA cache_size = 10000;
-PRAGMA temp_store = MEMORY;
-```
-
-### Schema Lifecycle & DDL Isolation
-All table definitions and index allocations are consolidated inside `init_db()`. Individual mutation methods (`add_security_event`, `add_alert`, `record_finding`) execute pure parameterized DML (`INSERT`, `UPDATE`), eliminating runtime schema lock contention during high-volume telemetry ingestion.
-
-```
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                                   DATABASE TABLES SCHEMA                               │
-├───────────────────┬──────────────────────────────────┬─────────────────────────────────┤
-│ Table Name        │ Primary Key / Indexes            │ Purpose                         │
-├───────────────────┼──────────────────────────────────┼─────────────────────────────────┤
-│ scan_findings     │ id [PK], finding_hash [IDX]      │ Normalized vulnerability records│
-│ carved_artifacts  │ id [PK], capture_id [IDX]        │ Extracted media & binary files  │
-│ scan_reports      │ report_id [PK], target [IDX]     │ Executive assessments & CVSS    │
-│ security_events   │ id [PK], timestamp [IDX]         │ SIEM access & auth event logs   │
-│ alerts            │ id [PK], status [IDX]            │ Rule-triggered detection alerts │
-│ baselines         │ id [PK], metric_name [IDX]       │ Statistical metric baselines    │
-│ threat_intel_entries│ ip_address [IDX]               │ Correlated threat feed IOCs     │
-│ geo_cache         │ ip [PK]                          │ Cached IP geographic resolution │
-│ blocked_ips       │ ip_address [PK]                  │ WAF firewall dynamic blacklist  │
-│ signing_keys      │ kid [PK], status [IDX]           │ Active JWKS signing keys        │
-└───────────────────┴──────────────────────────────────┴─────────────────────────────────┘
-```
-
----
-
-## 5. 💻 Client State Management & Persistence Guard
-
-The frontend application uses **Zustand** for centralized state management with persistent browser storage. To ensure long-running packet captures and scans do not exceed the browser's 5MB `localStorage` limit, the store employs a strict state partitioning filter:
-
-```typescript
-export const useScanStore = create<ScanStore>()(
-  persist(
-    (set, get) => ({
-      // State & Actions
-    }),
-    { 
-      name: 'vulnscan-store',
-      partialize: (state) => Object.fromEntries(
-        Object.entries(state).filter(([key]) => !['livePackets', 'activeScanId'].includes(key))
-      ),
-    }
-  )
-);
-```
-
-* **Dropped Transient Keys**: High-frequency streaming packet buffers (`livePackets`) and ephemeral runtime handles (`activeScanId`) are kept in active memory but excluded from serialized storage.
-* **Persisted Data**: Scan configurations, target definitions, schedules, and normalized scan history are reliably retained across page refreshes.
-
----
-
-## 6. 🔌 API Specification & Route Reference
-
-### Web Zenmap Studio (`/api/nmap/*`)
-* `GET /api/nmap/profiles`: Returns structured scan profiles (`quick_scan`, `ping_sweep`, `intense_scan`, `nse_vuln_audit`).
-* `POST /api/nmap/scan`: Launches validated background scan.
-* `GET /api/nmap/status/{scan_id}`: Returns live progress, discovered hosts, and raw output stream.
-* `GET /api/nmap/topology/{scan_id}`: Precomputed server-side radial coordinate positions.
-* `POST /api/nmap/import-xml`: Parses uploaded `.xml` / `.gnmap` scan logs safely.
-* `POST /api/nmap/cancel/{scan_id}`: Cancels active subprocess.
-
-### Interactive HTTP Repeater (`/api/repeater/*`)
-* `POST /api/repeater/send`: Replays raw HTTP requests with SSRF guard and streaming cap.
-* `POST /api/repeater/check-ssrf`: Pre-flight target IP safety check.
-
-### SSL/TLS Security Auditor (`/api/ssl/*`)
-* `POST /api/ssl/audit`: Evaluates TLS 1.0–1.3, weak ciphers, cert health, and HSTS.
-
-### Baseline Diff Scanner (`/api/scan/*`)
-* `POST /api/scan/diff`: Computes 4-way classification (`New`, `Resolved`, `Still-Open`, `Changed-Severity`).
-* `GET /api/scan/findings`: Retrieves indexed finding records.
-
-### Packet Forensics & Ingestion (`/api/pcap/*`)
-* `POST /api/pcap/upload`: Uploads and parses capture files (enforces `os.path.basename` sanitization).
-* `POST /api/pcap/upload-keylog`: Ingests `SSLKEYLOGFILE` for TLS/QUIC decryption (sanitized).
-* `GET /api/pcap/carved/{capture_id}`: Returns carved media and files.
-* `GET /api/pcap/carved/download/{filename}`: Downloads inert carved file.
-* `GET /api/pcap/geomap/{capture_id}`: Resolves batch-aggregated geographic threat flow arcs.
-* `GET /api/pcap/beaconing/{capture_id}`: Calculates C2 interval deltas and jitter percentages.
-
-### Executive Reports & CVSS 3.1 (`/api/reports/*`, `/api/cvss/*`)
-* `POST /api/reports/generate`: Generates executive HTML/PDF assessment asynchronously.
-* `GET /api/reports/status/{report_id}`: Polls report build status.
-* `GET /api/reports/download/{report_id}`: Downloads completed report.
-* `POST /api/cvss/calculate`: Computes exact FIRST.org CVSS 3.1 base score.
+## 4. Security & Hardening Controls
+1. **SSRF Guard**: Blocks RFC1918 private subnets and cloud metadata endpoints (`169.254.169.254`).
+2. **Path Traversal Protection**: Uses `os.path.basename` and strict folder resolution on all file upload and capture handlers.
+3. **Subprocess Sanitization**: Replaced all shell executions with typed argument arrays (`execFile` / `subprocess.Popen`) to prevent command injection.
+4. **Zustand Storage Quotas**: Applied `partialize` to exclude high-volume network packet arrays from browser LocalStorage.
