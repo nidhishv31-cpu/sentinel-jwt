@@ -42,6 +42,8 @@ UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 from backend.detection_rules import run_siem_rules
 from backend.devsecops.remediator import AIRemediator
+from backend.api_fuzzer import OpenAPIFuzzer
+from backend.cisa_epss_feeds import CISAKEVEngine
 
 app = FastAPI(title="SentinelJWT Security Suite", version="1.0.0")
 
@@ -1625,6 +1627,56 @@ def create_github_pull_request(payload: RemediatePRRequest):
         return res
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to dispatch GitHub PR: {str(e)}")
+
+# --- 14. OPENAPI / SWAGGER SECURITY FUZZER ENDPOINTS ---
+
+class FuzzerParseRequest(BaseModel):
+    spec: Any
+
+class FuzzerExecuteRequest(BaseModel):
+    target_base_url: str
+    endpoints: List[Dict[str, Any]]
+    suite_config: Optional[Dict[str, bool]] = None
+
+@app.post("/api/fuzzer/parse-spec")
+def parse_openapi_spec(payload: FuzzerParseRequest):
+    """Parses OpenAPI 2.0/3.0 spec from URL or raw JSON and returns endpoint routes."""
+    res = OpenAPIFuzzer.parse_spec(payload.spec)
+    if not res.get("success"):
+        raise HTTPException(status_code=400, detail=res.get("error", "Failed to parse spec"))
+    return res
+
+@app.post("/api/fuzzer/execute")
+def execute_openapi_fuzzer(payload: FuzzerExecuteRequest):
+    """Executes BOLA, Mass Assignment, SQLi, and Auth fuzzing suite."""
+    res = OpenAPIFuzzer.execute_fuzz_suite(
+        target_base_url=payload.target_base_url,
+        endpoints=payload.endpoints,
+        suite_config=payload.suite_config
+    )
+    return res
+
+# --- 15. CISA KEV & EPSS REAL-TIME THREAT INTEL ENDPOINTS ---
+
+cisa_kev_engine = CISAKEVEngine()
+
+@app.post("/api/threat-intel/cisa-kev/sync")
+def sync_cisa_kev_catalog():
+    """Syncs local database with the live CISA Known Exploited Vulnerabilities catalog."""
+    res = cisa_kev_engine.sync_live_catalog()
+    return res
+
+@app.get("/api/threat-intel/cisa-kev/list")
+def list_cisa_kev_catalog(search: Optional[str] = None, ransomware_only: bool = False, limit: int = 50):
+    """Returns searchable CISA KEV intelligence catalog."""
+    entries = cisa_kev_engine.list_kev_entries(search=search, ransomware_only=ransomware_only, limit=limit)
+    return {"count": len(entries), "entries": entries}
+
+@app.get("/api/threat-intel/cve-lookup/{cve_id}")
+def lookup_cve_threat_intel(cve_id: str):
+    """Enriches a CVE ID with CISA KEV exploitation status and EPSS percentile."""
+    return cisa_kev_engine.lookup_cve(cve_id)
+
 
 
 
