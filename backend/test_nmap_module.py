@@ -1,17 +1,23 @@
-"""
-Comprehensive Test Suite for Module 13: Web Zenmap / Nmap Studio
-Covers input validation, injection prevention, XML streaming parser,
-fallback socket scanner, and radial topology calculations.
-"""
-
-import pytest
+import sys
+import os
 import asyncio
 from unittest.mock import patch
-from backend.nmap_engine import (
-    validate_scan_target, validate_and_build_custom_flags,
-    parse_nmap_xml_string, compute_radial_topology_coordinates,
-    run_fallback_socket_scan, NmapScanJob, HIGH_RISK_PORTS
-)
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+try:
+    from nmap_engine import (
+        validate_scan_target, validate_and_build_custom_flags,
+        parse_nmap_xml_string, compute_radial_topology_coordinates,
+        run_fallback_socket_scan, NmapScanJob, HIGH_RISK_PORTS
+    )
+except ImportError:
+    from backend.nmap_engine import (
+        validate_scan_target, validate_and_build_custom_flags,
+        parse_nmap_xml_string, compute_radial_topology_coordinates,
+        run_fallback_socket_scan, NmapScanJob, HIGH_RISK_PORTS
+    )
 
 # ── 1. INPUT VALIDATION & INJECTION PREVENTION TESTS ──────────────────────────
 
@@ -43,8 +49,12 @@ def test_validate_scan_target_injection_rejection():
         ""
     ]
     for bad_target in injection_attempts:
-        with pytest.raises(ValueError):
+        failed = False
+        try:
             validate_scan_target(bad_target)
+        except ValueError:
+            failed = True
+        assert failed, f"Expected ValueError for injection target: {bad_target}"
 
 def test_custom_builder_flags_valid():
     """Verify custom builder produces safe, typed flag array."""
@@ -67,17 +77,24 @@ def test_custom_builder_flags_valid():
     assert "-p" in flags
     assert "80,443,8000-8080" in flags
     assert "--min-rate=500" in flags
-    # Validates that only allowlisted scripts are included
     assert "--script=vulners,banner" in flags
     assert "invalid_script_name" not in "".join(flags)
 
 def test_custom_builder_flags_rejection():
     """Verify out-of-range rates and malicious port syntax are rejected."""
-    with pytest.raises(ValueError):
-        validate_and_build_custom_flags({"min_rate": 99999}) # Exceeds 5000 cap
+    rate_failed = False
+    try:
+        validate_and_build_custom_flags({"min_rate": 99999})
+    except ValueError:
+        rate_failed = True
+    assert rate_failed
 
-    with pytest.raises(ValueError):
-        validate_and_build_custom_flags({"port_range": "80; rm -rf /"}) # Bad port range
+    port_failed = False
+    try:
+        validate_and_build_custom_flags({"port_range": "80; rm -rf /"})
+    except ValueError:
+        port_failed = True
+    assert port_failed
 
 # ── 2. XML STREAMING & MALFORMED PARSER TESTS ─────────────────────────────────
 
@@ -123,7 +140,7 @@ def test_parse_nmap_xml_well_formed():
     assert h["ip"] == "45.33.32.156"
     assert "scanme.nmap.org" in h["hostnames"]
     assert len(h["ports"]) == 3
-    assert h["risk_level"] == "high" # Because 3389 RDP is open
+    assert h["risk_level"] == "high"
     assert len(h["trace_hops"]) == 2
     assert h["os_matches"][0]["name"] == "Linux 5.4"
 
@@ -156,17 +173,16 @@ def test_compute_radial_topology_coordinates():
     assert len(hops) == 2
     for hop in hops:
         radius = (hop["x"]**2 + hop["y"]**2)**0.5
-        assert radius == pytest.approx(140.0, abs=1.0)
+        assert abs(radius - 140.0) < 1.0
         
     # Target node (Ring 2)
     targets = [n for n in nodes if n["ring"] == 2]
     assert len(targets) == 1
     radius = (targets[0]["x"]**2 + targets[0]["y"]**2)**0.5
-    assert radius == pytest.approx(280.0, abs=1.0)
+    assert abs(radius - 280.0) < 1.0
 
 # ── 4. FALLBACK SOCKET SCANNER TEST ───────────────────────────────────────────
 
-@pytest.mark.asyncio
 async def test_run_fallback_socket_scan():
     """Verify fallback native TCP connect-scan activates when nmap is absent."""
     job = NmapScanJob("test_scan", "127.0.0.1", "fallback", [])
@@ -175,3 +191,15 @@ async def test_run_fallback_socket_scan():
     assert job.engine_type == "basic connect-scan (nmap unavailable)"
     assert len(hosts) == 1
     assert hosts[0]["ip"] == "127.0.0.1"
+
+if __name__ == "__main__":
+    print("Running Web Zenmap / Nmap Engine test suite...")
+    test_validate_scan_target_valid()
+    test_validate_scan_target_injection_rejection()
+    test_custom_builder_flags_valid()
+    test_custom_builder_flags_rejection()
+    test_parse_nmap_xml_well_formed()
+    test_parse_nmap_xml_truncated_streaming()
+    test_compute_radial_topology_coordinates()
+    asyncio.run(test_run_fallback_socket_scan())
+    print("All Nmap Engine unit tests PASSED successfully!")

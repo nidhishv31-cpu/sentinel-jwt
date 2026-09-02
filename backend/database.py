@@ -15,6 +15,7 @@ def get_connection(db_path: str = DEFAULT_DB_PATH) -> sqlite3.Connection:
     try:
         conn.execute("PRAGMA journal_mode = WAL;")
         conn.execute("PRAGMA synchronous = NORMAL;")
+        conn.execute("PRAGMA busy_timeout = 5000;")
         conn.execute("PRAGMA cache_size = 10000;")
         conn.execute("PRAGMA temp_store = MEMORY;")
     except Exception:

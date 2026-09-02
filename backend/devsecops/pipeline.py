@@ -166,6 +166,7 @@ async def run_devsecops_pipeline(
     # Automated Clone / Pull
     target_repo = repo_path or options.get("repo_name")
     resolved_path = await clone_or_pull_repo(target_repo, run_id)
+    is_cloned_workspace = "workspace" in resolved_path and os.path.exists(resolved_path)
     target_url = target_url or "http://localhost:3000"
 
     database.update_pipeline_run(run_id, current_stage="static_analysis")
@@ -173,87 +174,95 @@ async def run_devsecops_pipeline(
     all_findings: List[Finding] = []
     stages_status = {}
 
-    # --- 1. Concurrent Static Analysis Lane ---
-    t0 = datetime.utcnow()
-    sast_task = run_semgrep(resolved_path, run_id, repo_id)
-    sca_task = run_sca(resolved_path, run_id, repo_id)
-    iac_task = run_iac(resolved_path, run_id, repo_id) if has_iac_files(resolved_path) else None
+    try:
+        # --- 1. Concurrent Static Analysis Lane ---
+        t0 = datetime.utcnow()
+        sast_task = run_semgrep(resolved_path, run_id, repo_id)
+        sca_task = run_sca(resolved_path, run_id, repo_id)
+        iac_task = run_iac(resolved_path, run_id, repo_id) if has_iac_files(resolved_path) else None
 
-    results = await asyncio.gather(
-        sast_task,
-        sca_task,
-        *( [iac_task] if iac_task else [] )
-    )
+        results = await asyncio.gather(
+            sast_task,
+            sca_task,
+            *( [iac_task] if iac_task else [] )
+        )
 
-    sast_findings = results[0]
-    sca_findings, sbom_comps = results[1]
-    iac_findings = results[2] if iac_task else []
+        sast_findings = results[0]
+        sca_findings, sbom_comps = results[1]
+        iac_findings = results[2] if iac_task else []
 
-    all_findings.extend(sast_findings)
-    all_findings.extend(sca_findings)
-    all_findings.extend(iac_findings)
+        all_findings.extend(sast_findings)
+        all_findings.extend(sca_findings)
+        all_findings.extend(iac_findings)
 
-    # Persist SBOM components
-    if sbom_comps:
-        database.add_sbom_components([c.dict() for c in sbom_comps], run_id, repo_id)
+        # Persist SBOM components
+        if sbom_comps:
+            database.add_sbom_components([c.dict() for c in sbom_comps], run_id, repo_id)
 
-    stages_status["sast"] = {"status": "passed", "findings": len(sast_findings)}
-    stages_status["sca"] = {"status": "passed", "findings": len(sca_findings), "sbom_count": len(sbom_comps)}
-    stages_status["iac"] = {"status": "passed" if iac_task else "skipped", "findings": len(iac_findings)}
+        stages_status["sast"] = {"status": "passed", "findings": len(sast_findings)}
+        stages_status["sca"] = {"status": "passed", "findings": len(sca_findings), "sbom_count": len(sbom_comps)}
+        stages_status["iac"] = {"status": "passed" if iac_task else "skipped", "findings": len(iac_findings)}
 
-    # --- 2. Container Scan Lane ---
-    database.update_pipeline_run(run_id, current_stage="container_scan")
-    container_findings = await run_container(repo_path, run_id, repo_id)
-    all_findings.extend(container_findings)
-    stages_status["container"] = {"status": "passed", "findings": len(container_findings)}
+        # --- 2. Container Scan Lane ---
+        database.update_pipeline_run(run_id, current_stage="container_scan")
+        container_findings = await run_container(resolved_path, run_id, repo_id)
+        all_findings.extend(container_findings)
+        stages_status["container"] = {"status": "passed", "findings": len(container_findings)}
 
-    # --- 3. DAST Lane ---
-    if options.get("enable_dast", True):
-        database.update_pipeline_run(run_id, current_stage="dast_scan")
-        dast_findings = await run_zap_dast(target_url, run_id, environment=options.get("environment", "staging"), repo_id=repo_id)
-        all_findings.extend(dast_findings)
-        stages_status["dast"] = {"status": "passed", "findings": len(dast_findings)}
+        # --- 3. DAST Lane ---
+        if options.get("enable_dast", True):
+            database.update_pipeline_run(run_id, current_stage="dast_scan")
+            dast_findings = await run_zap_dast(target_url, run_id, environment=options.get("environment", "staging"), repo_id=repo_id)
+            all_findings.extend(dast_findings)
+            stages_status["dast"] = {"status": "passed", "findings": len(dast_findings)}
 
-    # --- 4. CSPM Lane ---
-    if options.get("enable_cspm", False):
-        database.update_pipeline_run(run_id, current_stage="cspm_scan")
-        cspm_findings = await run_cspm(provider=options.get("cloud_provider", "aws"), run_id=run_id, repo_id=repo_id)
-        all_findings.extend(cspm_findings)
-        stages_status["cspm"] = {"status": "passed", "findings": len(cspm_findings)}
+        # --- 4. CSPM Lane ---
+        if options.get("enable_cspm", False):
+            database.update_pipeline_run(run_id, current_stage="cspm_scan")
+            cspm_findings = await run_cspm(provider=options.get("cloud_provider", "aws"), run_id=run_id, repo_id=repo_id)
+            all_findings.extend(cspm_findings)
+            stages_status["cspm"] = {"status": "passed", "findings": len(cspm_findings)}
 
-    # --- 5. Persist All Unified Findings to Database ---
-    for f in all_findings:
-        database.add_unified_finding(f.dict())
+        # --- 5. Persist All Unified Findings to Database ---
+        for f in all_findings:
+            database.add_unified_finding(f.dict())
 
-    # --- 6. Generate SARIF & Markdown Reports ---
-    sarif_path = generate_sarif_report(all_findings, run_id)
-    markdown_path = generate_markdown_report(all_findings, run_id, options.get("repo_name", "Target Repository"))
+        # --- 6. Generate SARIF & Markdown Reports ---
+        sarif_path = generate_sarif_report(all_findings, run_id)
+        markdown_path = generate_markdown_report(all_findings, run_id, options.get("repo_name", "Target Repository"))
 
-    summary = {
-        "total_findings": len(all_findings),
-        "critical": sum(1 for f in all_findings if f.severity == "critical"),
-        "high": sum(1 for f in all_findings if f.severity == "high"),
-        "medium": sum(1 for f in all_findings if f.severity == "medium"),
-        "low": sum(1 for f in all_findings if f.severity in ["low", "info"]),
-        "sarif_report": sarif_path,
-        "markdown_report": markdown_path
-    }
+        summary = {
+            "total_findings": len(all_findings),
+            "critical": sum(1 for f in all_findings if f.severity == "critical"),
+            "high": sum(1 for f in all_findings if f.severity == "high"),
+            "medium": sum(1 for f in all_findings if f.severity == "medium"),
+            "low": sum(1 for f in all_findings if f.severity in ["low", "info"]),
+            "sarif_report": sarif_path,
+            "markdown_report": markdown_path
+        }
 
-    database.update_pipeline_run(
-        run_id,
-        status="completed",
-        current_stage="complete",
-        stages=stages_status,
-        summary=summary,
-        sarif_path=sarif_path,
-        markdown_report_path=markdown_path,
-        completed=True
-    )
+        database.update_pipeline_run(
+            run_id,
+            status="completed",
+            current_stage="complete",
+            stages=stages_status,
+            summary=summary,
+            sarif_path=sarif_path,
+            markdown_report_path=markdown_path,
+            completed=True
+        )
 
-    return {
-        "run_id": run_id,
-        "status": "completed",
-        "stages": stages_status,
-        "summary": summary,
-        "findings_count": len(all_findings)
-    }
+        return {
+            "run_id": run_id,
+            "status": "completed",
+            "stages": stages_status,
+            "summary": summary,
+            "findings_count": len(all_findings)
+        }
+    finally:
+        # Automatic Workspace Cleanup Policy
+        if is_cloned_workspace and os.path.exists(resolved_path):
+            try:
+                shutil.rmtree(resolved_path, ignore_errors=True)
+            except Exception as e:
+                print(f"[Cleanup Warning]: Could not remove {resolved_path}: {e}")
