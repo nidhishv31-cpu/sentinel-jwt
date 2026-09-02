@@ -1,0 +1,278 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "VulnScan DevSecOps Engine",
+          "version": "2.5.0",
+          "rules": [
+            {
+              "id": "SEMGREP-CWE-89",
+              "name": "Potential SQL Injection via raw string concatenation",
+              "shortDescription": {
+                "text": "Potential SQL Injection via raw string concatenation"
+              },
+              "fullDescription": {
+                "text": "Detected raw string formatting inside SQL query builder without parameterization."
+              },
+              "help": {
+                "text": "Use parameterized queries: cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))"
+              },
+              "properties": {
+                "tags": [
+                  "sast",
+                  "semgrep",
+                  "high"
+                ]
+              }
+            },
+            {
+              "id": "SEMGREP-CWE-798",
+              "name": "Hardcoded API Secret or Token",
+              "shortDescription": {
+                "text": "Hardcoded API Secret or Token"
+              },
+              "fullDescription": {
+                "text": "Found static API secret token assigned in source repository."
+              },
+              "help": {
+                "text": "Load secrets from environment variables (.env) or secret managers at runtime."
+              },
+              "properties": {
+                "tags": [
+                  "sast",
+                  "semgrep",
+                  "medium"
+                ]
+              }
+            },
+            {
+              "id": "GRYPE-CWE-1395",
+              "name": "Vulnerable Dependency: jsonwebtoken@8.5.1 RCE via insecure key verification",
+              "shortDescription": {
+                "text": "Vulnerable Dependency: jsonwebtoken@8.5.1 RCE via insecure key verification"
+              },
+              "fullDescription": {
+                "text": "jsonwebtoken library versions before 9.0.0 are vulnerable to Remote Code Execution via crafted key objects."
+              },
+              "help": {
+                "text": "Upgrade jsonwebtoken to >= 9.0.0"
+              },
+              "properties": {
+                "tags": [
+                  "sca",
+                  "grype",
+                  "critical"
+                ]
+              }
+            },
+            {
+              "id": "TRIVY-CWE-1395",
+              "name": "Container Image Vulnerability: libssl3 HTTP/2 Rapid Reset",
+              "shortDescription": {
+                "text": "Container Image Vulnerability: libssl3 HTTP/2 Rapid Reset"
+              },
+              "fullDescription": {
+                "text": "The HTTP/2 protocol is susceptible to denial of service attacks via rapid reset frames in the base Alpine image."
+              },
+              "help": {
+                "text": "Upgrade base image to node:20-alpine or later with patched libssl3."
+              },
+              "properties": {
+                "tags": [
+                  "container",
+                  "trivy",
+                  "high"
+                ]
+              }
+            },
+            {
+              "id": "ZAP-CWE-79",
+              "name": "Cross-Site Scripting (Reflected) in Search Parameter",
+              "shortDescription": {
+                "text": "Cross-Site Scripting (Reflected) in Search Parameter"
+              },
+              "fullDescription": {
+                "text": "The search parameter reflects user-supplied HTML entities without proper sanitation."
+              },
+              "help": {
+                "text": "Apply contextual HTML encoding and enforce strict Content-Security-Policy (CSP)."
+              },
+              "properties": {
+                "tags": [
+                  "dast",
+                  "zap",
+                  "high"
+                ]
+              }
+            },
+            {
+              "id": "ZAP-CWE-693",
+              "name": "Missing Anti-clickjacking Header (X-Frame-Options)",
+              "shortDescription": {
+                "text": "Missing Anti-clickjacking Header (X-Frame-Options)"
+              },
+              "fullDescription": {
+                "text": "The server response is missing the X-Frame-Options or frame-ancestors CSP directive."
+              },
+              "help": {
+                "text": "Add 'X-Frame-Options: DENY' or 'Content-Security-Policy: frame-ancestors 'none'' to all responses."
+              },
+              "properties": {
+                "tags": [
+                  "dast",
+                  "zap",
+                  "medium"
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "SEMGREP-CWE-89",
+          "ruleIndex": 0,
+          "level": "error",
+          "message": {
+            "text": "Detected raw string formatting inside SQL query builder without parameterization."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/api/auth.py"
+                },
+                "region": {
+                  "startLine": 42
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "SEMGREP-CWE-798",
+          "ruleIndex": 1,
+          "level": "warning",
+          "message": {
+            "text": "Found static API secret token assigned in source repository."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "config/jwt.ts"
+                },
+                "region": {
+                  "startLine": 18
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "GRYPE-CWE-1395",
+          "ruleIndex": 2,
+          "level": "error",
+          "message": {
+            "text": "jsonwebtoken library versions before 9.0.0 are vulnerable to Remote Code Execution via crafted key objects."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "package.json"
+                },
+                "region": {
+                  "startLine": 24
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "GRYPE-CWE-1395",
+          "ruleIndex": 2,
+          "level": "error",
+          "message": {
+            "text": "axios prior to version 0.21.2 is vulnerable to Regular Expression Denial of Service (ReDoS)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "package.json"
+                },
+                "region": {
+                  "startLine": 18
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "TRIVY-CWE-1395",
+          "ruleIndex": 3,
+          "level": "error",
+          "message": {
+            "text": "The HTTP/2 protocol is susceptible to denial of service attacks via rapid reset frames in the base Alpine image."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "Dockerfile"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ZAP-CWE-79",
+          "ruleIndex": 4,
+          "level": "error",
+          "message": {
+            "text": "The search parameter reflects user-supplied HTML entities without proper sanitation."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "http://localhost:3000/search?q=<script>alert(1)</script>"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ZAP-CWE-693",
+          "ruleIndex": 5,
+          "level": "warning",
+          "message": {
+            "text": "The server response is missing the X-Frame-Options or frame-ancestors CSP directive."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "http://localhost:3000"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

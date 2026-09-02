@@ -104,6 +104,47 @@ def generate_markdown_report(findings: List[Finding], run_id: str, repo_name: st
         out.write("\n".join(lines))
     return file_path
 
+import re
+import shutil
+
+async def clone_or_pull_repo(github_target: str, run_id: str) -> str:
+    """
+    Clones the target GitHub repo into a dedicated workspace directory using shallow git clone.
+    If github_target is already a local path, returns it directly.
+    """
+    if github_target and os.path.exists(github_target):
+        return os.path.abspath(github_target)
+
+    if not github_target:
+        return os.getcwd()
+
+    # Normalize URL
+    if not github_target.startswith("http"):
+        url = f"https://github.com/{github_target.strip('/')}.git"
+    else:
+        url = github_target if github_target.endswith(".git") else f"{github_target}.git"
+
+    clean_name = re.sub(r'[^a-zA-Z0-9_-]', '_', github_target.replace("https://github.com/", "").replace(".git", ""))
+    base_ws = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "scanner-app", "backend", "workspace"))
+    os.makedirs(base_ws, exist_ok=True)
+    workspace_dir = os.path.join(base_ws, f"{clean_name}_{run_id}")
+
+    git_bin = shutil.which("git")
+    if git_bin:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                git_bin, "clone", "--depth", "1", url, workspace_dir,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            await asyncio.wait_for(proc.communicate(), timeout=120)
+            if os.path.exists(workspace_dir):
+                return workspace_dir
+        except Exception as e:
+            print(f"[Git Clone Warning]: {e}")
+
+    return os.getcwd()
+
 async def run_devsecops_pipeline(
     run_id: str,
     repo_id: Optional[int] = None,
@@ -113,25 +154,30 @@ async def run_devsecops_pipeline(
 ) -> Dict[str, Any]:
     """
     Executes the multi-lane DevSecOps pipeline DAG.
-    1. Concurrent Static Lane: SAST + SCA + IaC
-    2. Container Image Scan (if Dockerfile present)
-    3. DAST Web Application Scan (if target URL configured)
-    4. CSPM Cloud Posture (if cloud options enabled)
+    1. Automated Repo Clone from GitHub URL / local path
+    2. Concurrent Static Lane: SAST + SCA + IaC
+    3. Container Image Scan (if Dockerfile present)
+    4. DAST Web Application Scan (if target URL configured)
+    5. CSPM Cloud Posture (if cloud options enabled)
     """
     options = options or {}
-    repo_path = repo_path or os.getcwd()
+    database.update_pipeline_run(run_id, status="running", current_stage="cloning_repository")
+
+    # Automated Clone / Pull
+    target_repo = repo_path or options.get("repo_name")
+    resolved_path = await clone_or_pull_repo(target_repo, run_id)
     target_url = target_url or "http://localhost:3000"
 
-    database.update_pipeline_run(run_id, status="running", current_stage="static_analysis")
+    database.update_pipeline_run(run_id, current_stage="static_analysis")
 
     all_findings: List[Finding] = []
     stages_status = {}
 
     # --- 1. Concurrent Static Analysis Lane ---
     t0 = datetime.utcnow()
-    sast_task = run_semgrep(repo_path, run_id, repo_id)
-    sca_task = run_sca(repo_path, run_id, repo_id)
-    iac_task = run_iac(repo_path, run_id, repo_id) if has_iac_files(repo_path) else None
+    sast_task = run_semgrep(resolved_path, run_id, repo_id)
+    sca_task = run_sca(resolved_path, run_id, repo_id)
+    iac_task = run_iac(resolved_path, run_id, repo_id) if has_iac_files(resolved_path) else None
 
     results = await asyncio.gather(
         sast_task,
