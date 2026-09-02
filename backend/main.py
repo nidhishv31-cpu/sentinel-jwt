@@ -4,12 +4,18 @@ import os
 import sys
 import tempfile
 import json
+
+backend_dir = os.path.dirname(os.path.abspath(__file__))
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+
 from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect, HTTPException, status
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
+import backend.database as database
 from backend.database import (
     init_db, DEFAULT_DB_PATH, get_connection, add_security_event, 
     add_alert, get_alerts, update_alert_status
@@ -1377,17 +1383,42 @@ def get_scan_findings(target: str = None, severity: str = None, scan_id: str = N
 
 from devsecops.pipeline import run_devsecops_pipeline
 from devsecops.runners.msf_rpc import verify_finding_with_msf
+from pydantic import BaseModel
+
+class ConnectRepoRequest(BaseModel):
+    github_full_name: Optional[str] = None
+    repo_name: Optional[str] = None
+    default_branch: str = "main"
+    webhook_secret: Optional[str] = None
+    auto_pr_on_fix: bool = False
+
+class ScanRepoRequest(BaseModel):
+    environment: str = "staging"
+    target_url: str = "http://localhost:3000"
+    enable_dast: bool = True
+    enable_cspm: bool = False
+    cloud_provider: str = "aws"
+
+class ExploitVerifyRequest(BaseModel):
+    target_host: str = "127.0.0.1"
+    module_name: str = "exploit/multi/http/sample_verifier"
+    module_options: Dict[str, Any] = {}
+    is_authorized_lab: bool = False
+    run_id: str = "manual_verification"
+    finding_id: Optional[str] = None
+    target_id: Optional[int] = None
+    operator: str = "analyst"
 
 @app.post("/api/repos/connect")
-async def connect_repository(payload: Dict[str, Any]):
+async def connect_repository(payload: ConnectRepoRequest):
     """Registers and initializes a GitHub repository for DevSecOps pipeline scanning."""
-    repo_name = payload.get("github_full_name") or payload.get("repo_name")
+    repo_name = payload.github_full_name or payload.repo_name
     if not repo_name:
         raise HTTPException(status_code=400, detail="Repository name (e.g. user/repo) is required.")
         
-    default_branch = payload.get("default_branch", "main")
-    auto_pr = bool(payload.get("auto_pr_on_fix", False))
-    webhook_secret = payload.get("webhook_secret") or uuid.uuid4().hex
+    default_branch = payload.default_branch or "main"
+    auto_pr = bool(payload.auto_pr_on_fix)
+    webhook_secret = payload.webhook_secret or uuid.uuid4().hex
     
     # Store in database
     repo_id = database.add_repo(
@@ -1413,13 +1444,13 @@ def list_repositories():
     return {"repos": repos}
 
 @app.post("/api/repos/{repo_id}/scan")
-async def trigger_repo_pipeline_scan(repo_id: int, payload: Optional[Dict[str, Any]] = None):
+async def trigger_repo_pipeline_scan(repo_id: int, payload: Optional[ScanRepoRequest] = None):
     """Triggers an end-to-end DevSecOps pipeline scan (SAST, SCA, IaC, Container, DAST)."""
     repo = database.get_repo(repo_id)
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found.")
         
-    payload = payload or {}
+    payload = payload or ScanRepoRequest()
     run_id = f"run_{uuid.uuid4().hex[:8]}"
     
     # Register run
@@ -1432,17 +1463,17 @@ async def trigger_repo_pipeline_scan(repo_id: int, payload: Optional[Dict[str, A
     # Execute pipeline asynchronously in background
     options = {
         "repo_name": repo["github_full_name"],
-        "environment": payload.get("environment", "staging"),
-        "enable_dast": payload.get("enable_dast", True),
-        "enable_cspm": payload.get("enable_cspm", False),
-        "cloud_provider": payload.get("cloud_provider", "aws")
+        "environment": payload.environment,
+        "enable_dast": payload.enable_dast,
+        "enable_cspm": payload.enable_cspm,
+        "cloud_provider": payload.cloud_provider
     }
     
     asyncio.create_task(run_devsecops_pipeline(
         run_id=run_id,
         repo_id=repo_id,
         repo_path=repo.get("local_path"),
-        target_url=payload.get("target_url", "http://localhost:3000"),
+        target_url=payload.target_url,
         options=options
     ))
     
@@ -1497,19 +1528,19 @@ def download_markdown_report(run_id: str):
     return FileResponse(run["markdown_report_path"], media_type="text/markdown", filename=f"SECURITY_REPORT_{run_id}.md")
 
 @app.post("/api/exploit/verify")
-async def execute_consent_gated_exploit(payload: Dict[str, Any]):
+async def execute_consent_gated_exploit(payload: ExploitVerifyRequest):
     """
     Executes consent-gated Metasploit RPC verification.
     STRICT SERVER-SIDE CONSENT GATE:
     Rejects immediately with HTTP 403 if is_authorized_lab is False.
     """
-    target_host = payload.get("target_host", "127.0.0.1")
-    module_name = payload.get("module_name", "exploit/multi/http/sample_verifier")
-    module_options = payload.get("module_options", {})
-    is_authorized_lab = bool(payload.get("is_authorized_lab", False))
-    run_id = payload.get("run_id", "manual_verification")
-    finding_id = payload.get("finding_id")
-    target_id = payload.get("target_id")
+    target_host = payload.target_host
+    module_name = payload.module_name
+    module_options = payload.module_options
+    is_authorized_lab = payload.is_authorized_lab
+    run_id = payload.run_id
+    finding_id = payload.finding_id
+    target_id = payload.target_id
 
     if not is_authorized_lab:
         database.add_exploit_audit(
@@ -1518,7 +1549,7 @@ async def execute_consent_gated_exploit(payload: Dict[str, Any]):
             finding_id=finding_id,
             payload_summary=str(module_options),
             result="DENIED: Target is not an authorized lab environment.",
-            operator=payload.get("operator", "analyst")
+            operator=payload.operator
         )
         raise HTTPException(status_code=403, detail="Consent Required: Exploit verification is strictly restricted to targets explicitly flagged as 'authorized_lab'.")
 
@@ -1537,7 +1568,7 @@ async def execute_consent_gated_exploit(payload: Dict[str, Any]):
             finding_id=finding_id,
             payload_summary=res.get("payload_summary"),
             result=res.get("result", "Success"),
-            operator=payload.get("operator", "analyst")
+            operator=payload.operator
         )
         return {"success": True, "details": res}
     except Exception as e:
@@ -1547,7 +1578,7 @@ async def execute_consent_gated_exploit(payload: Dict[str, Any]):
             finding_id=finding_id,
             payload_summary=str(module_options),
             result=f"FAILED: {str(e)}",
-            operator=payload.get("operator", "analyst")
+            operator=payload.operator
         )
         raise HTTPException(status_code=500, detail=str(e))
 

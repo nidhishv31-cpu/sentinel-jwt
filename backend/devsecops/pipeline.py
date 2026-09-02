@@ -11,7 +11,10 @@ from .runners.iac_runner import run_iac, has_iac_files
 from .runners.container_runner import run_container, has_dockerfile
 from .runners.zap_runner import run_zap_dast
 from .runners.cspm_runner import run_cspm
-import database
+try:
+    import database
+except ImportError:
+    from backend import database
 
 REPORTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "reports_generated")
 os.makedirs(REPORTS_DIR, exist_ok=True)
