@@ -177,12 +177,101 @@ def init_db(db_path: str = DEFAULT_DB_PATH):
     )
     """)
 
+    # --- DevSecOps Pipeline Extension Tables ---
+    # Create repos table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS repos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        github_full_name TEXT NOT NULL,
+        default_branch TEXT NOT NULL DEFAULT 'main',
+        install_token_ref TEXT,
+        webhook_secret TEXT,
+        local_path TEXT,
+        last_synced_at TEXT,
+        auto_pr_on_fix BOOLEAN DEFAULT 0
+    )
+    """)
+
+    # Create pipeline_runs table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS pipeline_runs (
+        id TEXT PRIMARY KEY,
+        repo_id INTEGER,
+        status TEXT NOT NULL DEFAULT 'queued',
+        current_stage TEXT,
+        stages_json TEXT,
+        summary_json TEXT,
+        sarif_path TEXT,
+        markdown_report_path TEXT,
+        started_at TEXT,
+        completed_at TEXT
+    )
+    """)
+
+    # Create sbom_components table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS sbom_components (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id TEXT NOT NULL,
+        repo_id INTEGER,
+        name TEXT NOT NULL,
+        version TEXT NOT NULL,
+        ecosystem TEXT NOT NULL,
+        license TEXT,
+        purl TEXT
+    )
+    """)
+
+    # Create exploit_audit_log table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS exploit_audit_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp TEXT NOT NULL,
+        target_id INTEGER,
+        module_name TEXT NOT NULL,
+        finding_id TEXT,
+        payload_summary TEXT,
+        result TEXT NOT NULL,
+        operator TEXT DEFAULT 'system'
+    )
+    """)
+
+    # Create unified_findings table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS unified_findings (
+        id TEXT PRIMARY KEY,
+        source TEXT NOT NULL,
+        tool TEXT NOT NULL,
+        repo_id INTEGER,
+        run_id TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        cwe TEXT,
+        cve TEXT,
+        title TEXT NOT NULL,
+        description TEXT,
+        file_path TEXT,
+        line INTEGER,
+        endpoint TEXT,
+        evidence TEXT,
+        remediation TEXT,
+        status TEXT DEFAULT 'open',
+        created_at TEXT NOT NULL
+    )
+    """)
+
     # Additional Indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_findings_target ON scan_findings(target)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_findings_hash ON scan_findings(finding_hash)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_findings_scan ON scan_findings(scan_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_carved_capture ON carved_artifacts(capture_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_reports_id ON scan_reports(report_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_repos_name ON repos(github_full_name)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pipeline_repo ON pipeline_runs(repo_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sbom_run ON sbom_components(run_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_exploit_target ON exploit_audit_log(target_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_unified_findings_run ON unified_findings(run_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_unified_findings_severity ON unified_findings(severity)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_unified_findings_source ON unified_findings(source)")
 
     conn.commit()
     conn.close()
@@ -265,3 +354,204 @@ def update_alert_status(alert_id: int, status: str, db_path: str = DEFAULT_DB_PA
     conn.commit()
     conn.close()
     return updated
+
+# --- DevSecOps Helper Functions ---
+
+def add_repo(github_full_name: str, default_branch: str = 'main', install_token_ref: Optional[str] = None, webhook_secret: Optional[str] = None, local_path: Optional[str] = None, auto_pr_on_fix: bool = False, db_path: str = DEFAULT_DB_PATH) -> int:
+    conn = get_connection(db_path)
+    cursor = conn.cursor()
+    last_synced = datetime.utcnow().isoformat()
+    cursor.execute(
+        "INSERT INTO repos (github_full_name, default_branch, install_token_ref, webhook_secret, local_path, last_synced_at, auto_pr_on_fix) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (github_full_name, default_branch, install_token_ref, webhook_secret, local_path, last_synced, 1 if auto_pr_on_fix else 0)
+    )
+    repo_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return repo_id
+
+def get_repos(db_path: str = DEFAULT_DB_PATH) -> List[Dict[str, Any]]:
+    conn = get_connection(db_path)
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM repos ORDER BY id DESC")
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def get_repo(repo_id: int, db_path: str = DEFAULT_DB_PATH) -> Optional[Dict[str, Any]]:
+    conn = get_connection(db_path)
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM repos WHERE id = ?", (repo_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def add_pipeline_run(run_id: str, repo_id: Optional[int] = None, status: str = 'queued', current_stage: Optional[str] = None, stages: Optional[Dict[str, Any]] = None, summary: Optional[Dict[str, Any]] = None, sarif_path: Optional[str] = None, markdown_report_path: Optional[str] = None, db_path: str = DEFAULT_DB_PATH) -> str:
+    conn = get_connection(db_path)
+    cursor = conn.cursor()
+    started_at = datetime.utcnow().isoformat()
+    stages_str = json.dumps(stages or {})
+    summary_str = json.dumps(summary or {})
+    cursor.execute(
+        "INSERT INTO pipeline_runs (id, repo_id, status, current_stage, stages_json, summary_json, sarif_path, markdown_report_path, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (run_id, repo_id, status, current_stage, stages_str, summary_str, sarif_path, markdown_report_path, started_at)
+    )
+    conn.commit()
+    conn.close()
+    return run_id
+
+def update_pipeline_run(run_id: str, status: Optional[str] = None, current_stage: Optional[str] = None, stages: Optional[Dict[str, Any]] = None, summary: Optional[Dict[str, Any]] = None, sarif_path: Optional[str] = None, markdown_report_path: Optional[str] = None, completed: bool = False, db_path: str = DEFAULT_DB_PATH) -> bool:
+    conn = get_connection(db_path)
+    cursor = conn.cursor()
+    updates = []
+    params = []
+    
+    if status is not None:
+        updates.append("status = ?")
+        params.append(status)
+    if current_stage is not None:
+        updates.append("current_stage = ?")
+        params.append(current_stage)
+    if stages is not None:
+        updates.append("stages_json = ?")
+        params.append(json.dumps(stages))
+    if summary is not None:
+        updates.append("summary_json = ?")
+        params.append(json.dumps(summary))
+    if sarif_path is not None:
+        updates.append("sarif_path = ?")
+        params.append(sarif_path)
+    if markdown_report_path is not None:
+        updates.append("markdown_report_path = ?")
+        params.append(markdown_report_path)
+    if completed:
+        updates.append("completed_at = ?")
+        params.append(datetime.utcnow().isoformat())
+        
+    if not updates:
+        conn.close()
+        return False
+        
+    params.append(run_id)
+    query = f"UPDATE pipeline_runs SET {', '.join(updates)} WHERE id = ?"
+    cursor.execute(query, tuple(params))
+    updated = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return updated
+
+def get_pipeline_run(run_id: str, db_path: str = DEFAULT_DB_PATH) -> Optional[Dict[str, Any]]:
+    conn = get_connection(db_path)
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM pipeline_runs WHERE id = ?", (run_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None
+    res = dict(row)
+    res["stages"] = json.loads(res.get("stages_json") or "{}")
+    res["summary"] = json.loads(res.get("summary_json") or "{}")
+    return res
+
+def list_pipeline_runs(repo_id: Optional[int] = None, limit: int = 50, db_path: str = DEFAULT_DB_PATH) -> List[Dict[str, Any]]:
+    conn = get_connection(db_path)
+    cursor = conn.cursor()
+    if repo_id is not None:
+        cursor.execute("SELECT * FROM pipeline_runs WHERE repo_id = ? ORDER BY started_at DESC LIMIT ?", (repo_id, limit))
+    else:
+        cursor.execute("SELECT * FROM pipeline_runs ORDER BY started_at DESC LIMIT ?", (limit,))
+    rows = cursor.fetchall()
+    conn.close()
+    results = []
+    for r in rows:
+        item = dict(r)
+        item["stages"] = json.loads(item.get("stages_json") or "{}")
+        item["summary"] = json.loads(item.get("summary_json") or "{}")
+        results.append(item)
+    return results
+
+def add_unified_finding(finding: Dict[str, Any], db_path: str = DEFAULT_DB_PATH) -> str:
+    conn = get_connection(db_path)
+    cursor = conn.cursor()
+    created_at = finding.get("created_at") or datetime.utcnow().isoformat()
+    cursor.execute("""
+        INSERT OR REPLACE INTO unified_findings 
+        (id, source, tool, repo_id, run_id, severity, cwe, cve, title, description, file_path, line, endpoint, evidence, remediation, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        finding["id"], finding["source"], finding["tool"], finding.get("repo_id"), finding["run_id"],
+        finding["severity"], finding.get("cwe"), finding.get("cve"), finding["title"],
+        finding.get("description"), finding.get("file_path"), finding.get("line"),
+        finding.get("endpoint"), finding.get("evidence"), finding.get("remediation"),
+        finding.get("status", "open"), created_at
+    ))
+    conn.commit()
+    conn.close()
+    return finding["id"]
+
+def get_unified_findings(run_id: Optional[str] = None, repo_id: Optional[int] = None, source: Optional[str] = None, severity: Optional[str] = None, db_path: str = DEFAULT_DB_PATH) -> List[Dict[str, Any]]:
+    conn = get_connection(db_path)
+    cursor = conn.cursor()
+    query = "SELECT * FROM unified_findings WHERE 1=1"
+    params = []
+    if run_id:
+        query += " AND run_id = ?"
+        params.append(run_id)
+    if repo_id:
+        query += " AND repo_id = ?"
+        params.append(repo_id)
+    if source:
+        query += " AND source = ?"
+        params.append(source)
+    if severity:
+        query += " AND severity = ?"
+        params.append(severity)
+    query += " ORDER BY CASE severity WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 WHEN 'low' THEN 4 ELSE 5 END, id ASC"
+    cursor.execute(query, tuple(params))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def add_sbom_components(components: List[Dict[str, Any]], run_id: str, repo_id: Optional[int] = None, db_path: str = DEFAULT_DB_PATH):
+    conn = get_connection(db_path)
+    cursor = conn.cursor()
+    for c in components:
+        cursor.execute(
+            "INSERT INTO sbom_components (run_id, repo_id, name, version, ecosystem, license, purl) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (run_id, repo_id, c.get("name", ""), c.get("version", ""), c.get("ecosystem", ""), c.get("license"), c.get("purl"))
+        )
+    conn.commit()
+    conn.close()
+
+def get_sbom_components(run_id: str, db_path: str = DEFAULT_DB_PATH) -> List[Dict[str, Any]]:
+    conn = get_connection(db_path)
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM sbom_components WHERE run_id = ? ORDER BY name ASC", (run_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def add_exploit_audit(target_id: Optional[int], module_name: str, result: str, finding_id: Optional[str] = None, payload_summary: Optional[str] = None, operator: str = "system", db_path: str = DEFAULT_DB_PATH) -> int:
+    conn = get_connection(db_path)
+    cursor = conn.cursor()
+    ts = datetime.utcnow().isoformat()
+    cursor.execute(
+        "INSERT INTO exploit_audit_log (timestamp, target_id, module_name, finding_id, payload_summary, result, operator) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (ts, target_id, module_name, finding_id, payload_summary, result, operator)
+    )
+    entry_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return entry_id
+
+def get_exploit_audits(target_id: Optional[int] = None, limit: int = 100, db_path: str = DEFAULT_DB_PATH) -> List[Dict[str, Any]]:
+    conn = get_connection(db_path)
+    cursor = conn.cursor()
+    if target_id:
+        cursor.execute("SELECT * FROM exploit_audit_log WHERE target_id = ? ORDER BY timestamp DESC LIMIT ?", (target_id, limit))
+    else:
+        cursor.execute("SELECT * FROM exploit_audit_log ORDER BY timestamp DESC LIMIT ?", (limit,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+

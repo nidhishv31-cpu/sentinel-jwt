@@ -1370,3 +1370,191 @@ def get_scan_findings(target: str = None, severity: str = None, scan_id: str = N
     conn.close()
     return {"findings": [dict(r) for r in rows]}
 
+
+# ==============================================================================
+# DEVSECOPS PIPELINE & GITHUB INTEGRATION ENDPOINTS
+# ==============================================================================
+
+from devsecops.pipeline import run_devsecops_pipeline
+from devsecops.runners.msf_rpc import verify_finding_with_msf
+
+@app.post("/api/repos/connect")
+async def connect_repository(payload: Dict[str, Any]):
+    """Registers and initializes a GitHub repository for DevSecOps pipeline scanning."""
+    repo_name = payload.get("github_full_name") or payload.get("repo_name")
+    if not repo_name:
+        raise HTTPException(status_code=400, detail="Repository name (e.g. user/repo) is required.")
+        
+    default_branch = payload.get("default_branch", "main")
+    auto_pr = bool(payload.get("auto_pr_on_fix", False))
+    webhook_secret = payload.get("webhook_secret") or uuid.uuid4().hex
+    
+    # Store in database
+    repo_id = database.add_repo(
+        github_full_name=repo_name,
+        default_branch=default_branch,
+        webhook_secret=webhook_secret,
+        auto_pr_on_fix=auto_pr
+    )
+    
+    return {
+        "success": True,
+        "repo_id": repo_id,
+        "github_full_name": repo_name,
+        "default_branch": default_branch,
+        "webhook_secret": webhook_secret,
+        "auto_pr_on_fix": auto_pr
+    }
+
+@app.get("/api/repos")
+def list_repositories():
+    """Lists all connected GitHub repositories."""
+    repos = database.get_repos()
+    return {"repos": repos}
+
+@app.post("/api/repos/{repo_id}/scan")
+async def trigger_repo_pipeline_scan(repo_id: int, payload: Optional[Dict[str, Any]] = None):
+    """Triggers an end-to-end DevSecOps pipeline scan (SAST, SCA, IaC, Container, DAST)."""
+    repo = database.get_repo(repo_id)
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found.")
+        
+    payload = payload or {}
+    run_id = f"run_{uuid.uuid4().hex[:8]}"
+    
+    # Register run
+    database.add_pipeline_run(
+        run_id=run_id,
+        repo_id=repo_id,
+        status="queued"
+    )
+    
+    # Execute pipeline asynchronously in background
+    options = {
+        "repo_name": repo["github_full_name"],
+        "environment": payload.get("environment", "staging"),
+        "enable_dast": payload.get("enable_dast", True),
+        "enable_cspm": payload.get("enable_cspm", False),
+        "cloud_provider": payload.get("cloud_provider", "aws")
+    }
+    
+    asyncio.create_task(run_devsecops_pipeline(
+        run_id=run_id,
+        repo_id=repo_id,
+        repo_path=repo.get("local_path"),
+        target_url=payload.get("target_url", "http://localhost:3000"),
+        options=options
+    ))
+    
+    return {
+        "success": True,
+        "run_id": run_id,
+        "status": "queued",
+        "repo_id": repo_id,
+        "repo_name": repo["github_full_name"]
+    }
+
+@app.get("/api/runs")
+def list_runs(repo_id: Optional[int] = None, limit: int = 50):
+    """Lists recent pipeline runs."""
+    runs = database.list_pipeline_runs(repo_id=repo_id, limit=limit)
+    return {"runs": runs}
+
+@app.get("/api/runs/{run_id}")
+def get_run_status(run_id: str):
+    """Retrieves pipeline run metadata, stage progress, and findings summary."""
+    run = database.get_pipeline_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Pipeline run not found.")
+    return run
+
+@app.get("/api/runs/{run_id}/findings")
+def get_run_unified_findings(run_id: str, source: Optional[str] = None, severity: Optional[str] = None):
+    """Retrieves normalized unified findings for a given pipeline run."""
+    findings = database.get_unified_findings(run_id=run_id, source=source, severity=severity)
+    return {"run_id": run_id, "findings": findings, "count": len(findings)}
+
+@app.get("/api/runs/{run_id}/sbom")
+def get_run_sbom_components(run_id: str):
+    """Retrieves CycloneDX SBOM components inventory for a given pipeline run."""
+    components = database.get_sbom_components(run_id=run_id)
+    return {"run_id": run_id, "components": components, "count": len(components)}
+
+@app.get("/api/runs/{run_id}/report.sarif")
+def download_sarif_report(run_id: str):
+    """Downloads standard SARIF v2.1.0 security report."""
+    run = database.get_pipeline_run(run_id)
+    if not run or not run.get("sarif_path") or not os.path.exists(run["sarif_path"]):
+        raise HTTPException(status_code=404, detail="SARIF report not generated for this run.")
+    return FileResponse(run["sarif_path"], media_type="application/sarif+json", filename=f"findings_{run_id}.sarif")
+
+@app.get("/api/runs/{run_id}/report.md")
+def download_markdown_report(run_id: str):
+    """Downloads GitHub Markdown security report."""
+    run = database.get_pipeline_run(run_id)
+    if not run or not run.get("markdown_report_path") or not os.path.exists(run["markdown_report_path"]):
+        raise HTTPException(status_code=404, detail="Markdown report not generated for this run.")
+    return FileResponse(run["markdown_report_path"], media_type="text/markdown", filename=f"SECURITY_REPORT_{run_id}.md")
+
+@app.post("/api/exploit/verify")
+async def execute_consent_gated_exploit(payload: Dict[str, Any]):
+    """
+    Executes consent-gated Metasploit RPC verification.
+    STRICT SERVER-SIDE CONSENT GATE:
+    Rejects immediately with HTTP 403 if is_authorized_lab is False.
+    """
+    target_host = payload.get("target_host", "127.0.0.1")
+    module_name = payload.get("module_name", "exploit/multi/http/sample_verifier")
+    module_options = payload.get("module_options", {})
+    is_authorized_lab = bool(payload.get("is_authorized_lab", False))
+    run_id = payload.get("run_id", "manual_verification")
+    finding_id = payload.get("finding_id")
+    target_id = payload.get("target_id")
+
+    if not is_authorized_lab:
+        database.add_exploit_audit(
+            target_id=target_id,
+            module_name=module_name,
+            finding_id=finding_id,
+            payload_summary=str(module_options),
+            result="DENIED: Target is not an authorized lab environment.",
+            operator=payload.get("operator", "analyst")
+        )
+        raise HTTPException(status_code=403, detail="Consent Required: Exploit verification is strictly restricted to targets explicitly flagged as 'authorized_lab'.")
+
+    try:
+        res = await verify_finding_with_msf(
+            target_host=target_host,
+            module_name=module_name,
+            module_options=module_options,
+            is_authorized_lab=is_authorized_lab,
+            run_id=run_id,
+            finding_id=finding_id
+        )
+        database.add_exploit_audit(
+            target_id=target_id,
+            module_name=module_name,
+            finding_id=finding_id,
+            payload_summary=res.get("payload_summary"),
+            result=res.get("result", "Success"),
+            operator=payload.get("operator", "analyst")
+        )
+        return {"success": True, "details": res}
+    except Exception as e:
+        database.add_exploit_audit(
+            target_id=target_id,
+            module_name=module_name,
+            finding_id=finding_id,
+            payload_summary=str(module_options),
+            result=f"FAILED: {str(e)}",
+            operator=payload.get("operator", "analyst")
+        )
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/exploit/audit-log")
+def get_exploit_audit_logs(target_id: Optional[int] = None, limit: int = 100):
+    """Retrieves tamper-evident consent-gated exploit audit trails."""
+    logs = database.get_exploit_audits(target_id=target_id, limit=limit)
+    return {"audit_logs": logs}
+
+
